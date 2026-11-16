@@ -1,0 +1,28 @@
+services:
+  kidartvault:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: kidartvault:latest
+    container_name: kidartvault
+    restart: unless-stopped
+    ports:
+      - "${HOST_PORT:-8080}:8000"
+    environment:
+      - DATA_DIR=/data
+      - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY in .env}
+      - COOKIE_SECURE=${COOKIE_SECURE:-false}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-}
+      - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-30}
+      - TZ=${TZ:-UTC}
+    volumes:
+      # Persist SQLite database, original artworks, and thumbnails on your Synology volume
+      - ./data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    security_opt:
+      - no-new-privileges:true
