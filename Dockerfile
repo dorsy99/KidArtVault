@@ -1,5 +1,5 @@
-# Stage 1: Build the React + Vite PWA frontend
-FROM node:22-alpine AS frontend-builder
+# Stage 1: Build the React + Vite PWA frontend (always run on native builder arch)
+FROM --platform=$BUILDPLATFORM node:22-alpine AS frontend-builder
 WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm install --no-audit --no-fund
@@ -29,6 +29,9 @@ COPY backend/requirements.txt ./requirements.txt
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY backend/app ./app
+COPY backend/tests ./tests
+COPY backend/pytest.ini ./pytest.ini
+RUN pytest -q && rm -rf tests pytest.ini .pytest_cache
 COPY --from=frontend-builder /build/dist ./static
 
 RUN mkdir -p /data && chown -R kidart:kidart /data /app

@@ -27,7 +27,7 @@ def get_current_user(
         )
     with get_db(settings.db_path) as conn:
         row = conn.execute(
-            "SELECT id, username, totp_enabled, created_at FROM users WHERE id = ?",
+            "SELECT id, username, role, totp_enabled, created_at FROM users WHERE id = ?",
             (payload["uid"],),
         ).fetchone()
     if not row:
@@ -35,4 +35,24 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found",
         )
-    return dict(row)
+    user = dict(row)
+    user["totp_enabled"] = bool(user["totp_enabled"])
+    return user
+
+
+def require_admin(user: dict = Depends(get_current_user)) -> dict:
+    if user.get("role") != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admin privileges required",
+        )
+    return user
+
+
+def require_contributor(user: dict = Depends(get_current_user)) -> dict:
+    if user.get("role") not in ("admin", "member"):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Contributor privileges required",
+        )
+    return user

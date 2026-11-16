@@ -30,6 +30,17 @@ class Disable2FARequest(BaseModel):
     code: str = Field(min_length=6, max_length=10)
 
 
+class UserCreate(BaseModel):
+    username: str = Field(min_length=2, max_length=50)
+    password: str = Field(min_length=8, max_length=128)
+    role: str = Field(default="member", pattern=r"^(admin|member|viewer)$")
+
+
+class UserUpdate(BaseModel):
+    role: str | None = Field(default=None, pattern=r"^(admin|member|viewer)$")
+    password: str | None = Field(default=None, min_length=8, max_length=128)
+
+
 class KidCreate(BaseModel):
     name: str = Field(min_length=1, max_length=60)
     birthdate: str | None = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")

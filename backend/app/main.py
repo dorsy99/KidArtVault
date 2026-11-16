@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import Settings, load_settings
 from app.database import init_db
-from app.routers import artworks, auth, kids, options, shares
+from app.routers import artworks, auth, kids, options, shares, users
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -47,6 +47,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return {"status": "ok"}
 
     app.include_router(auth.router)
+    app.include_router(users.router)
     app.include_router(kids.router)
     app.include_router(artworks.router)
     app.include_router(options.router)

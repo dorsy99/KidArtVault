@@ -89,3 +89,44 @@ def test_options_locations_and_tags(client):
     r = client.delete("/api/options/tag", params={"value": "A4"})
     assert r.status_code == 200
     assert "A4" not in r.json()["tags"]
+
+
+def test_kid_update_cascade_cleanup_and_invalid_uploads(client, tmp_path):
+    _auth(client)
+    kid = client.post("/api/kids", json={"name": "Leo", "birthdate": "2020-02-02"}).json()
+
+    # Update kid profile
+    r = client.patch(f"/api/kids/{kid['id']}", json={"name": "Leonardo", "color": "#7ec8a7"})
+    assert r.status_code == 200
+    assert r.json()["name"] == "Leonardo"
+    assert r.json()["color"] == "#7ec8a7"
+
+    # Reject non-image upload
+    r = client.post(
+        "/api/artworks",
+        data={"kid_id": str(kid["id"]), "title": "Not an image"},
+        files={"file": ("bad.txt", b"hello world", "text/plain")},
+    )
+    assert r.status_code == 400
+
+    # Reject oversized upload (> 10MB test limit)
+    r = client.post(
+        "/api/artworks",
+        data={"kid_id": str(kid["id"]), "title": "Too big"},
+        files={"file": ("big.png", b"\x00" * (10 * 1024 * 1024 + 10), "image/png")},
+    )
+    assert r.status_code == 413
+
+    # Upload valid artwork, then delete kid and confirm disk files are cleaned up
+    art = client.post(
+        "/api/artworks",
+        data={"kid_id": str(kid["id"]), "title": ""},
+        files={"file": ("art.png", _make_png_bytes(), "image/png")},
+    ).json()
+    assert art["title"] == "Untitled Artwork"
+    assert len(list((tmp_path / "originals").iterdir())) == 1
+    assert len(list((tmp_path / "thumbs").iterdir())) == 1
+
+    assert client.delete(f"/api/kids/{kid['id']}").status_code == 204
+    assert len(list((tmp_path / "originals").iterdir())) == 0
+    assert len(list((tmp_path / "thumbs").iterdir())) == 0

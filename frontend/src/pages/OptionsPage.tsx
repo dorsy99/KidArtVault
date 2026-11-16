@@ -11,12 +11,13 @@ import {
   ShieldOff,
   Tag,
   Trash2,
+  UserPlus,
   Users,
   X,
 } from 'lucide-react';
 import { api } from '../api/client';
 import { ShareModal } from '../components/ShareModal';
-import { KID_COLORS, type Kid, type ShareLink, type User } from '../types';
+import { KID_COLORS, type Kid, type ShareLink, type User, type UserRole } from '../types';
 
 interface OptionsPageProps {
   user: User;
@@ -25,10 +26,19 @@ interface OptionsPageProps {
   onUserChanged: (user: User) => void;
 }
 
-type SectionTab = 'all' | 'children' | 'locations' | 'tags' | 'shares' | 'security';
+type SectionTab = 'all' | 'users' | 'children' | 'locations' | 'tags' | 'shares' | 'security';
 
 export const OptionsPage: React.FC<OptionsPageProps> = ({ user, kids, onKidsChanged, onUserChanged }) => {
-  const [activeTab, setActiveTab] = useState<SectionTab>('all');
+  const isAdmin = user.role === 'admin';
+  const [activeTab, setActiveTab] = useState<SectionTab>(isAdmin ? 'all' : 'security');
+
+  // Users management state (admin only)
+  const [users, setUsers] = useState<User[]>([]);
+  const [newUsername, setNewUsername] = useState('');
+  const [newUserPassword, setNewUserPassword] = useState('');
+  const [newUserRole, setNewUserRole] = useState<UserRole>('member');
+  const [userSaving, setUserSaving] = useState(false);
+  const [userErr, setUserErr] = useState('');
 
   // Children management state
   const [kidName, setKidName] = useState('');
@@ -67,12 +77,57 @@ export const OptionsPage: React.FC<OptionsPageProps> = ({ user, kids, onKidsChan
   const [pwErr, setPwErr] = useState('');
 
   useEffect(() => {
+    if (!isAdmin) return;
+    api.users.list().then(setUsers).catch(() => {});
     api.options.get().then((res) => {
       setLocations(res.locations);
       setTags(res.tags);
     });
     api.shares.list().then(setShares);
-  }, []);
+  }, [isAdmin]);
+
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setUserSaving(true);
+    setUserErr('');
+    try {
+      const created = await api.users.create({
+        username: newUsername.trim(),
+        password: newUserPassword,
+        role: newUserRole,
+      });
+      setUsers((prev) => [...prev, created]);
+      setNewUsername('');
+      setNewUserPassword('');
+      setNewUserRole('member');
+    } catch (err) {
+      setUserErr(err instanceof Error ? err.message : 'Failed to create user');
+    } finally {
+      setUserSaving(false);
+    }
+  };
+
+  const handleChangeUserRole = async (target: User, role: UserRole) => {
+    setUserErr('');
+    try {
+      const updated = await api.users.update(target.id, { role });
+      setUsers((prev) => prev.map((u) => (u.id === target.id ? updated : u)));
+      if (target.id === user.id) onUserChanged(updated);
+    } catch (err) {
+      setUserErr(err instanceof Error ? err.message : 'Failed to update role');
+    }
+  };
+
+  const handleDeleteUser = async (target: User) => {
+    if (!confirm(`Delete user "${target.username}"?`)) return;
+    setUserErr('');
+    try {
+      await api.users.remove(target.id);
+      setUsers((prev) => prev.filter((u) => u.id !== target.id));
+    } catch (err) {
+      setUserErr(err instanceof Error ? err.message : 'Failed to delete user');
+    }
+  };
 
   const handleCreateKid = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -210,36 +265,147 @@ export const OptionsPage: React.FC<OptionsPageProps> = ({ user, kids, onKidsChan
     setShares((prev) => prev.filter((s) => s.token !== token));
   };
 
-  const show = (tab: Exclude<SectionTab, 'all'>) => activeTab === 'all' || activeTab === tab;
+  const show = (tab: Exclude<SectionTab, 'all'>) => {
+    if (!isAdmin && tab !== 'security') return false;
+    return activeTab === 'all' || activeTab === tab;
+  };
 
   return (
     <div style={{ display: 'grid', gap: 18, maxWidth: 820, width: '100%', margin: '0 auto' }}>
       <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-        <h1 style={{ margin: 0, fontSize: '1.4rem' }}>Options</h1>
-        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          {(
-            [
-              ['all', 'All'],
-              ['children', 'Children'],
-              ['locations', 'Locations'],
-              ['tags', 'Tags'],
-              ['shares', 'Shares'],
-              ['security', 'Security'],
-            ] as const
-          ).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              className={`pill ${activeTab === id ? 'active' : ''}`}
-              onClick={() => setActiveTab(id)}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <h1 style={{ margin: 0, fontSize: '1.4rem' }}>{isAdmin ? 'Options' : 'Account Security'}</h1>
+        {isAdmin && (
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+            {(
+              [
+                ['all', 'All'],
+                ['users', 'Users'],
+                ['children', 'Children'],
+                ['locations', 'Locations'],
+                ['tags', 'Tags'],
+                ['shares', 'Shares'],
+                ['security', 'Security'],
+              ] as const
+            ).map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                className={`pill ${activeTab === id ? 'active' : ''}`}
+                onClick={() => setActiveTab(id)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {optErr && <div className="error-banner">{optErr}</div>}
+
+      {/* Users Subsection (Admin Only) */}
+      {show('users') && (
+        <section className="card" style={{ padding: 20, display: 'grid', gap: 14 }}>
+          <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <UserPlus size={20} color="var(--accent)" />
+            Users
+          </h2>
+          <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+            Admins have full access. <strong>Members</strong> can capture, edit, and view artworks. <strong>Viewers</strong> have read-only gallery access.
+          </p>
+          {userErr && <div className="error-banner">{userErr}</div>}
+
+          <form onSubmit={handleCreateUser} style={{ display: 'grid', gap: 10 }}>
+            <div style={{ display: 'grid', gap: 10, gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))' }}>
+              <input
+                className="input"
+                placeholder="Username"
+                value={newUsername}
+                onChange={(e) => setNewUsername(e.target.value)}
+                minLength={2}
+                required
+              />
+              <input
+                type="password"
+                className="input"
+                placeholder="Password (min 8 chars)"
+                value={newUserPassword}
+                onChange={(e) => setNewUserPassword(e.target.value)}
+                minLength={8}
+                required
+              />
+              <select
+                className="select"
+                value={newUserRole}
+                onChange={(e) => setNewUserRole(e.target.value as UserRole)}
+              >
+                <option value="member">Member (Upload &amp; Edit)</option>
+                <option value="viewer">Viewer (Read-only)</option>
+                <option value="admin">Admin (Full access)</option>
+              </select>
+            </div>
+            <div>
+              <button type="submit" className="btn btn-primary" disabled={userSaving}>
+                <Plus size={16} />
+                {userSaving ? 'Adding...' : 'Add User'}
+              </button>
+            </div>
+          </form>
+
+          <div style={{ display: 'grid', gap: 8 }}>
+            {users.map((u) => (
+              <div
+                key={u.id}
+                style={{
+                  padding: '10px 12px',
+                  borderRadius: 'var(--radius-sm)',
+                  border: '1px solid var(--border)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 10,
+                  flexWrap: 'wrap',
+                }}
+              >
+                <div>
+                  <div style={{ fontWeight: 700 }}>
+                    {u.username}{' '}
+                    {u.id === user.id && (
+                      <span style={{ fontSize: '0.78rem', color: 'var(--text-muted)', fontWeight: 500 }}>(you)</span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
+                    2FA: {u.totp_enabled ? 'Enabled' : 'Disabled'}
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <select
+                    className="select"
+                    value={u.role}
+                    onChange={(e) => handleChangeUserRole(u, e.target.value as UserRole)}
+                    style={{ width: 'auto', padding: '6px 10px', fontSize: '0.84rem' }}
+                  >
+                    <option value="admin">Admin</option>
+                    <option value="member">Member</option>
+                    <option value="viewer">Viewer</option>
+                  </select>
+                  {u.id !== user.id && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost"
+                      style={{ color: 'var(--danger)', padding: '6px 8px' }}
+                      onClick={() => handleDeleteUser(u)}
+                      title="Delete user"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Children Subsection */}
       {show('children') && (

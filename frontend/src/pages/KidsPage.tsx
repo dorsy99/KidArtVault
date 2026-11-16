@@ -7,9 +7,10 @@ import { formatAgeAtDate } from '../utils/age';
 
 interface KidsPageProps {
   kids: Kid[];
+  isAdmin: boolean;
 }
 
-export const KidsPage: React.FC<KidsPageProps> = ({ kids }) => {
+export const KidsPage: React.FC<KidsPageProps> = ({ kids, isAdmin }) => {
   const navigate = useNavigate();
   const [shareKid, setShareKid] = useState<Kid | null>(null);
   const today = new Date().toISOString().slice(0, 10);
@@ -18,9 +19,11 @@ export const KidsPage: React.FC<KidsPageProps> = ({ kids }) => {
     <div style={{ display: 'grid', gap: 18, maxWidth: 780, width: '100%', margin: '0 auto' }}>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 10 }}>
         <h1 style={{ margin: 0, fontSize: '1.4rem' }}>Children</h1>
-        <Link to="/options" className="btn btn-secondary" style={{ fontSize: '0.85rem', padding: '7px 12px' }}>
-          Manage Children in Options
-        </Link>
+        {isAdmin && (
+          <Link to="/options" className="btn btn-secondary" style={{ fontSize: '0.85rem', padding: '7px 12px' }}>
+            Manage Children in Options
+          </Link>
+        )}
       </div>
 
       {kids.length === 0 ? (
@@ -88,18 +91,20 @@ export const KidsPage: React.FC<KidsPageProps> = ({ kids }) => {
                 </div>
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <button
-                    type="button"
-                    className="btn btn-secondary"
-                    style={{ padding: '7px 12px', fontSize: '0.84rem' }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setShareKid(kid);
-                    }}
-                  >
-                    <Share2 size={14} />
-                    Share Gallery
-                  </button>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary"
+                      style={{ padding: '7px 12px', fontSize: '0.84rem' }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setShareKid(kid);
+                      }}
+                    >
+                      <Share2 size={14} />
+                      Share Gallery
+                    </button>
+                  )}
                   <ChevronRight size={20} color="var(--text-muted)" />
                 </div>
               </div>

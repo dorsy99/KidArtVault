@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: kidartvault:latest
+    image: dorsy99/kidartvault:latest
     container_name: kidartvault
     restart: unless-stopped
     ports:

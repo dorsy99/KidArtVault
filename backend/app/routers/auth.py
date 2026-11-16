@@ -59,12 +59,13 @@ def auth_status(request: Request, settings: Settings = Depends(get_settings)) ->
         if payload:
             with get_db(settings.db_path) as conn:
                 row = conn.execute(
-                    "SELECT id, username, totp_enabled, created_at FROM users WHERE id = ?",
+                    "SELECT id, username, role, totp_enabled, created_at FROM users WHERE id = ?",
                     (payload["uid"],),
                 ).fetchone()
             if row:
                 authenticated = True
                 user = dict(row)
+                user["totp_enabled"] = bool(user["totp_enabled"])
 
     return {
         "needs_setup": needs_setup,
@@ -90,7 +91,7 @@ def setup_admin(
                 detail="Initial setup has already been completed.",
             )
         cur = conn.execute(
-            "INSERT INTO users (username, password_hash) VALUES (?, ?)",
+            "INSERT INTO users (username, password_hash, role) VALUES (?, ?, 'admin')",
             (username, pw_hash),
         )
         conn.commit()
@@ -102,6 +103,7 @@ def setup_admin(
         "user": {
             "id": user_id,
             "username": username,
+            "role": "admin",
             "totp_enabled": False,
         }
     }
@@ -119,7 +121,7 @@ def login(
 
     with get_db(settings.db_path) as conn:
         row = conn.execute(
-            "SELECT id, username, password_hash, totp_enabled FROM users WHERE username = ?",
+            "SELECT id, username, role, password_hash, totp_enabled FROM users WHERE username = ?",
             (body.username.strip(),),
         ).fetchone()
 
@@ -150,6 +152,7 @@ def login(
         "user": {
             "id": row["id"],
             "username": row["username"],
+            "role": row["role"],
             "totp_enabled": bool(row["totp_enabled"]),
         },
     }
@@ -181,7 +184,7 @@ def verify_2fa(
 
     with get_db(settings.db_path) as conn:
         row = conn.execute(
-            "SELECT id, username, totp_secret, totp_enabled FROM users WHERE id = ?",
+            "SELECT id, username, role, totp_secret, totp_enabled FROM users WHERE id = ?",
             (user_id,),
         ).fetchone()
 
@@ -206,6 +209,7 @@ def verify_2fa(
         "user": {
             "id": row["id"],
             "username": row["username"],
+            "role": row["role"],
             "totp_enabled": True,
         }
     }

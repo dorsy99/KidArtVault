@@ -8,11 +8,12 @@ import type { Artwork, Kid } from '../types';
 
 interface GalleryPageProps {
   kids: Kid[];
+  canEdit: boolean;
   refreshKey: number;
   onOpenUpload: () => void;
 }
 
-export const GalleryPage: React.FC<GalleryPageProps> = ({ kids, refreshKey, onOpenUpload }) => {
+export const GalleryPage: React.FC<GalleryPageProps> = ({ kids, canEdit, refreshKey, onOpenUpload }) => {
   const [searchParams, setSearchParams] = useSearchParams();
   const initialKid = searchParams.get('kid');
   const [artworks, setArtworks] = useState<Artwork[]>([]);
@@ -206,7 +207,7 @@ export const GalleryPage: React.FC<GalleryPageProps> = ({ kids, refreshKey, onOp
                 artwork={art}
                 thumbUrl={`/api/artworks/${art.id}/thumb`}
                 onClick={() => setActiveArtwork(art)}
-                onToggleFavorite={(e) => handleToggleFavorite(e, art)}
+                onToggleFavorite={canEdit ? (e) => handleToggleFavorite(e, art) : undefined}
               />
             ))}
           </div>
@@ -218,6 +219,7 @@ export const GalleryPage: React.FC<GalleryPageProps> = ({ kids, refreshKey, onOp
           artwork={activeArtwork}
           kids={kids}
           imageUrl={`/api/artworks/${activeArtwork.id}/image`}
+          readOnly={!canEdit}
           onClose={() => setActiveArtwork(null)}
           onUpdated={(updated) => {
             setArtworks((prev) => prev.map((a) => (a.id === updated.id ? updated : a)));
