@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from app.config import Settings
 from app.database import get_db
-from app.deps import get_current_user, get_settings
+from app.deps import get_current_user, get_settings, require_admin
 from app.models import KidCreate, KidUpdate
 
 router = APIRouter(prefix="/api/kids", tags=["kids"])
@@ -33,7 +33,7 @@ def list_kids(
 @router.post("", status_code=status.HTTP_201_CREATED)
 def create_kid(
     body: KidCreate,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_admin),
     settings: Settings = Depends(get_settings),
 ) -> dict:
     with get_db(settings.db_path) as conn:
@@ -54,7 +54,7 @@ def create_kid(
 def update_kid(
     kid_id: int,
     body: KidUpdate,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_admin),
     settings: Settings = Depends(get_settings),
 ) -> dict:
     with get_db(settings.db_path) as conn:
@@ -99,7 +99,7 @@ def update_kid(
 @router.delete("/{kid_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_kid(
     kid_id: int,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_admin),
     settings: Settings = Depends(get_settings),
 ) -> None:
     with get_db(settings.db_path) as conn:

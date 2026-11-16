@@ -73,12 +73,13 @@ function AuthenticatedApp() {
           element={
             <GalleryPage
               kids={kids}
+              canEdit={user.role === 'admin' || user.role === 'member'}
               refreshKey={refreshKey}
               onOpenUpload={() => setShowUpload(true)}
             />
           }
         />
-        <Route path="/kids" element={<KidsPage kids={kids} />} />
+        <Route path="/kids" element={<KidsPage kids={kids} isAdmin={user.role === 'admin'} />} />
         <Route
           path="/options"
           element={

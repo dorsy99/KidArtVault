@@ -11,6 +11,7 @@ interface LayoutProps {
 }
 
 export const Layout: React.FC<LayoutProps> = ({ user, onLogout, onOpenUpload, children }) => {
+  const canCapture = user.role === 'admin' || user.role === 'member';
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -36,10 +37,12 @@ export const Layout: React.FC<LayoutProps> = ({ user, onLogout, onOpenUpload, ch
           </nav>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button type="button" className="btn btn-primary" onClick={onOpenUpload}>
-              <Camera size={17} />
-              <span>Capture Art</span>
-            </button>
+            {canCapture && (
+              <button type="button" className="btn btn-primary" onClick={onOpenUpload}>
+                <Camera size={17} />
+                <span>Capture Art</span>
+              </button>
+            )}
             <button
               type="button"
               className="btn btn-ghost"
@@ -60,15 +63,17 @@ export const Layout: React.FC<LayoutProps> = ({ user, onLogout, onOpenUpload, ch
           <Images size={20} />
           <span>Gallery</span>
         </NavLink>
-        <button
-          type="button"
-          className="mobile-nav-item"
-          style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer' }}
-          onClick={onOpenUpload}
-        >
-          <Camera size={22} />
-          <span>Capture</span>
-        </button>
+        {canCapture && (
+          <button
+            type="button"
+            className="mobile-nav-item"
+            style={{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer' }}
+            onClick={onOpenUpload}
+          >
+            <Camera size={22} />
+            <span>Capture</span>
+          </button>
+        )}
         <NavLink to="/kids" className={({ isActive }) => `mobile-nav-item ${isActive ? 'active' : ''}`}>
           <Users size={20} />
           <span>Kids</span>

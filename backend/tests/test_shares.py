@@ -45,3 +45,27 @@ def test_share_links_are_scoped_and_revocable(client):
     # Revoke share
     assert client.delete(f"/api/shares/{token}").status_code == 204
     assert client.get(f"/api/public/share/{token}").status_code == 404
+
+    # Single-artwork share scope
+    single_share = client.post(
+        "/api/shares",
+        json={"label": "Single Art", "artwork_id": art2["id"]},
+    ).json()
+    r = client.get(f"/api/public/share/{single_share['token']}")
+    assert r.status_code == 200
+    assert [a["id"] for a in r.json()["artworks"]] == [art2["id"]]
+    assert client.get(f"/api/public/share/{single_share['token']}/artworks/{art1['id']}/thumb").status_code == 404
+
+    # Expired share returns 410 Gone
+    from datetime import datetime, timedelta, timezone
+    from app.database import get_db
+
+    expired_token = "expired-test-token"
+    past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+    with get_db(client.app.state.settings.db_path) as conn:
+        conn.execute(
+            "INSERT INTO share_links (token, label, expires_at) VALUES (?, ?, ?)",
+            (expired_token, "Expired", past),
+        )
+        conn.commit()
+    assert client.get(f"/api/public/share/{expired_token}").status_code == 410

@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 
 from app.config import Settings
 from app.database import get_db
-from app.deps import get_current_user, get_settings
+from app.deps import get_settings, require_admin
 from app.models import ShareCreate
 from app.routers.artworks import _safe_file_response
 
@@ -52,7 +52,7 @@ def _validate_share_token(conn, token: str) -> dict:
 
 @router.get("/api/shares")
 def list_shares(
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_admin),
     settings: Settings = Depends(get_settings),
 ) -> list[dict]:
     with get_db(settings.db_path) as conn:
@@ -71,7 +71,7 @@ def list_shares(
 @router.post("/api/shares", status_code=status.HTTP_201_CREATED)
 def create_share(
     body: ShareCreate,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_admin),
     settings: Settings = Depends(get_settings),
 ) -> dict:
     if body.kid_id is not None and body.artwork_id is not None:
@@ -117,7 +117,7 @@ def create_share(
 @router.delete("/api/shares/{token}", status_code=status.HTTP_204_NO_CONTENT)
 def revoke_share(
     token: str,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_admin),
     settings: Settings = Depends(get_settings),
 ) -> None:
     with get_db(settings.db_path) as conn:

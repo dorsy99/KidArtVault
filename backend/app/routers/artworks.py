@@ -8,7 +8,7 @@ from fastapi.responses import FileResponse
 
 from app.config import Settings
 from app.database import get_db
-from app.deps import get_current_user, get_settings
+from app.deps import get_current_user, get_settings, require_contributor
 from app.images import process_and_save_artwork
 from app.models import ArtworkUpdate
 
@@ -135,7 +135,7 @@ async def upload_artwork(
     tags: str = Form(""),
     artwork_date: str = Form(""),
     is_favorite: bool = Form(False),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_contributor),
     settings: Settings = Depends(get_settings),
 ) -> dict:
     with get_db(settings.db_path) as conn:
@@ -230,7 +230,7 @@ def get_artwork(
 def update_artwork(
     artwork_id: str,
     body: ArtworkUpdate,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_contributor),
     settings: Settings = Depends(get_settings),
 ) -> dict:
     with get_db(settings.db_path) as conn:
@@ -276,7 +276,7 @@ def update_artwork(
 @router.delete("/{artwork_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_artwork(
     artwork_id: str,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_contributor),
     settings: Settings = Depends(get_settings),
 ) -> None:
     with get_db(settings.db_path) as conn:

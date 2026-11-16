@@ -3,7 +3,7 @@ from pydantic import BaseModel, Field
 
 from app.config import Settings
 from app.database import get_db
-from app.deps import get_current_user, get_settings
+from app.deps import get_current_user, get_settings, require_admin
 
 router = APIRouter(prefix="/api/options", tags=["options"])
 
@@ -37,7 +37,7 @@ def get_options(
 def add_option(
     kind: str,
     body: OptionCreate,
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_admin),
     settings: Settings = Depends(get_settings),
 ) -> dict:
     if kind not in VALID_KINDS:
@@ -64,7 +64,7 @@ def add_option(
 def remove_option(
     kind: str,
     value: str = Query(..., min_length=1),
-    user: dict = Depends(get_current_user),
+    user: dict = Depends(require_admin),
     settings: Settings = Depends(get_settings),
 ) -> dict:
     if kind not in VALID_KINDS:

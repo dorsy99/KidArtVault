@@ -1,4 +1,4 @@
-import type { Artwork, AuthStatus, Kid, PublicShareData, ShareLink, User } from '../types';
+import type { Artwork, AuthStatus, Kid, PublicShareData, ShareLink, User, UserRole } from '../types';
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -154,5 +154,22 @@ export const api = {
         `/api/options/${kind}?value=${encodeURIComponent(value)}`,
         { method: 'DELETE' },
       ),
+  },
+
+  users: {
+    list: () => request<User[]>('/api/users'),
+    create: (data: { username: string; password: string; role: UserRole }) =>
+      request<User>('/api/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      }),
+    update: (id: number, data: { role?: UserRole; password?: string }) =>
+      request<User>(`/api/users/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      }),
+    remove: (id: number) => request<void>(`/api/users/${id}`, { method: 'DELETE' }),
   },
 };

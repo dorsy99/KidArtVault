@@ -1,6 +1,9 @@
+export type UserRole = 'admin' | 'member' | 'viewer';
+
 export interface User {
   id: number;
   username: string;
+  role: UserRole;
   totp_enabled: boolean;
   created_at?: string;
 }
