@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 
 from app.config import Settings, load_settings
 from app.database import init_db
-from app.routers import artworks, auth, kids, options, shares, users
+from app.routers import artworks, auth, backup, kids, options, shares, users
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -52,6 +52,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(artworks.router)
     app.include_router(options.router)
     app.include_router(shares.router)
+    app.include_router(backup.router)
 
     static_dir = resolved_settings.static_dir
     if static_dir and static_dir.is_dir():

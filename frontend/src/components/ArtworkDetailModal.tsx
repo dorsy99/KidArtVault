@@ -59,7 +59,7 @@ export const ArtworkDetailModal: React.FC<ArtworkDetailModalProps> = ({
     try {
       const updated = await api.artworks.update(artwork.id, {
         kid_id: kidId,
-        title: title.trim() || 'Untitled Artwork',
+        title: title.trim(),
         location,
         artwork_date: artworkDate,
         tags,
@@ -112,7 +112,12 @@ export const ArtworkDetailModal: React.FC<ArtworkDetailModalProps> = ({
                 </button>
               </>
             )}
-            <a className="btn btn-ghost" href={imageUrl} download={`${artwork.title}.jpg`} title="Download original">
+            <a
+              className="btn btn-ghost"
+              href={imageUrl}
+              download={`${artwork.title || `${artwork.kid_name}-${artwork.artwork_date}`}.jpg`}
+              title="Download original"
+            >
               <Download size={18} />
             </a>
             <button type="button" className="btn btn-ghost" onClick={onClose}>
@@ -135,14 +140,14 @@ export const ArtworkDetailModal: React.FC<ArtworkDetailModalProps> = ({
         >
           <img
             src={imageUrl}
-            alt={artwork.title}
+            alt={artwork.title || `${artwork.kid_name}'s artwork`}
             style={{ maxWidth: '100%', maxHeight: '62dvh', objectFit: 'contain' }}
           />
         </div>
 
         {!editing ? (
           <div style={{ display: 'grid', gap: 8 }}>
-            <h2 style={{ margin: 0 }}>{artwork.title}</h2>
+            {artwork.title && <h2 style={{ margin: 0 }}>{artwork.title}</h2>}
             {artwork.notes && (
               <p style={{ margin: 0, color: 'var(--text)', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>
                 {artwork.notes}
@@ -183,8 +188,10 @@ export const ArtworkDetailModal: React.FC<ArtworkDetailModalProps> = ({
             </div>
 
             <div>
-              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: 4 }}>Title</label>
-              <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} required />
+              <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: 4 }}>
+                Title (optional)
+              </label>
+              <input className="input" value={title} onChange={(e) => setTitle(e.target.value)} />
             </div>
 
             <TagLocationPicker

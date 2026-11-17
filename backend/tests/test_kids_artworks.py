@@ -123,10 +123,69 @@ def test_kid_update_cascade_cleanup_and_invalid_uploads(client, tmp_path):
         data={"kid_id": str(kid["id"]), "title": ""},
         files={"file": ("art.png", _make_png_bytes(), "image/png")},
     ).json()
-    assert art["title"] == "Untitled Artwork"
-    assert len(list((tmp_path / "originals").iterdir())) == 1
-    assert len(list((tmp_path / "thumbs").iterdir())) == 1
+    assert art["title"] == ""
+    kid_orig_files = list((tmp_path / "originals" / "Leonardo").iterdir())
+    kid_thumb_files = list((tmp_path / "thumbs" / "Leonardo").iterdir())
+    assert len(kid_orig_files) == 1
+    assert len(kid_thumb_files) == 1
+    assert kid_orig_files[0].name.startswith("leonardo-")
 
     assert client.delete(f"/api/kids/{kid['id']}").status_code == 204
     assert len(list((tmp_path / "originals").iterdir())) == 0
     assert len(list((tmp_path / "thumbs").iterdir())) == 0
+
+
+def test_full_backup_download_admin_only(client):
+    import json
+    import zipfile
+
+    _auth(client)
+    kid = client.post("/api/kids", json={"name": "Maya"}).json()
+    client.post(
+        "/api/artworks",
+        data={"kid_id": str(kid["id"]), "title": "Sunny Day", "location": "Home"},
+        files={"file": ("sun.png", _make_png_bytes(), "image/png")},
+    )
+
+    r = client.get("/api/backup/download")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/zip"
+
+    with zipfile.ZipFile(io.BytesIO(r.content)) as zf:
+        names = zf.namelist()
+        assert "metadata.json" in names
+        assert any(n.startswith("originals/Maya/maya-") for n in names)
+        meta = json.loads(zf.read("metadata.json"))
+        assert meta["artworks"][0]["title"] == "Sunny Day"
+
+    # Non-admin member cannot download full backup
+    client.post("/api/users", json={"username": "member1", "password": "memberpassword1", "role": "member"})
+    client.post("/api/auth/logout")
+    client.post("/api/auth/login", json={"username": "member1", "password": "memberpassword1"})
+    assert client.get("/api/backup/download").status_code == 403
+
+
+def test_artwork_date_filter_sort_and_pagination(client):
+    _auth(client)
+    kid = client.post("/api/kids", json={"name": "Maya"}).json()
+
+    for title, d in [("Jan Art", "2026-01-15"), ("Mar Art", "2026-03-20"), ("Feb Art", "2026-02-10")]:
+        client.post(
+            "/api/artworks",
+            data={"kid_id": str(kid["id"]), "title": title, "artwork_date": d},
+            files={"file": ("art.png", _make_png_bytes(), "image/png")},
+        )
+
+    # Sort oldest first + pagination
+    r1 = client.get("/api/artworks", params={"sort": "oldest", "limit": 2, "offset": 0})
+    assert r1.status_code == 200
+    assert r1.json()["total"] == 3
+    assert [a["title"] for a in r1.json()["items"]] == ["Jan Art", "Feb Art"]
+
+    r2 = client.get("/api/artworks", params={"sort": "oldest", "limit": 2, "offset": 2})
+    assert [a["title"] for a in r2.json()["items"]] == ["Mar Art"]
+
+    # Date range filter
+    r3 = client.get("/api/artworks", params={"date_from": "2026-02-01", "date_to": "2026-02-28"})
+    assert r3.json()["total"] == 1
+    assert r3.json()["items"][0]["title"] == "Feb Art"

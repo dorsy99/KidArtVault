@@ -39,7 +39,7 @@ function solveLinearSystem(A: number[][], b: number[]): number[] {
  * Compute 3x3 homography matrix mapping destination (u,v) -> source (x,y).
  * Corners order: [top-left, top-right, bottom-right, bottom-left].
  */
-function computeHomography(src: [Point, Point, Point, Point], dstW: number, dstH: number): number[] {
+export function computeHomography(src: [Point, Point, Point, Point], dstW: number, dstH: number): number[] {
   const dst: [Point, Point, Point, Point] = [
     { x: 0, y: 0 },
     { x: dstW, y: 0 },

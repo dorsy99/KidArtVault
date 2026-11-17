@@ -55,7 +55,7 @@ class KidUpdate(BaseModel):
 
 class ArtworkUpdate(BaseModel):
     kid_id: int | None = None
-    title: str | None = Field(default=None, min_length=1, max_length=150)
+    title: str | None = Field(default=None, max_length=150)
     notes: str | None = Field(default=None, max_length=4000)
     location: str | None = Field(default=None, max_length=80)
     tags: list[str] | None = None

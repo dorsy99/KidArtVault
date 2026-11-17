@@ -26,8 +26,20 @@ jobs:
       - working-directory: backend
         run: pytest -v
 
+  frontend-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '26'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+      - working-directory: frontend
+        run: npm ci && npm test && npm run build
+
   docker-publish:
-    needs: test
+    needs: [test, frontend-test]
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:

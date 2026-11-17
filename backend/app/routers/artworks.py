@@ -31,7 +31,6 @@ def _parse_tags(raw: str | None) -> list[str]:
 
 def _serialize_artwork(row) -> dict:
     d = dict(row)
-    d.pop("medium", None)
     try:
         d["tags"] = json.loads(d.get("tags") or "[]")
     except json.JSONDecodeError:
@@ -47,6 +46,9 @@ def list_artworks(
     tag: str | None = Query(default=None),
     favorite: bool | None = Query(default=None),
     q: str | None = Query(default=None),
+    date_from: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    date_to: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    sort: str = Query(default="newest", pattern=r"^(newest|oldest)$"),
     limit: int = Query(default=60, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     user: dict = Depends(get_current_user),
@@ -66,6 +68,12 @@ def list_artworks(
     if tag:
         clauses.append("LOWER(a.tags) LIKE ?")
         params.append(f'%"{tag.strip().lower()}"%')
+    if date_from:
+        clauses.append("a.artwork_date >= ?")
+        params.append(date_from)
+    if date_to:
+        clauses.append("a.artwork_date <= ?")
+        params.append(date_to)
     if q:
         like = f"%{q.strip().lower()}%"
         clauses.append(
@@ -74,6 +82,11 @@ def list_artworks(
         params.extend([like, like, like, like])
 
     where_sql = " AND ".join(clauses)
+    order_sql = (
+        "a.artwork_date ASC, a.created_at ASC"
+        if sort == "oldest"
+        else "a.artwork_date DESC, a.created_at DESC"
+    )
 
     with get_db(settings.db_path) as conn:
         total = conn.execute(
@@ -86,7 +99,7 @@ def list_artworks(
             FROM artworks a
             JOIN kids k ON k.id = a.kid_id
             WHERE {where_sql}
-            ORDER BY a.artwork_date DESC, a.created_at DESC
+            ORDER BY {order_sql}
             LIMIT ? OFFSET ?
             """,
             [*params, limit, offset],
@@ -140,7 +153,7 @@ async def upload_artwork(
     settings: Settings = Depends(get_settings),
 ) -> dict:
     with get_db(settings.db_path) as conn:
-        kid = conn.execute("SELECT id FROM kids WHERE id = ?", (kid_id,)).fetchone()
+        kid = conn.execute("SELECT id, name FROM kids WHERE id = ?", (kid_id,)).fetchone()
         if not kid:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Child not found")
 
@@ -160,13 +173,15 @@ async def upload_artwork(
             artwork_id,
             settings.originals_dir,
             settings.thumbs_dir,
+            kid_name=kid["name"],
+            artwork_date=artwork_date,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     resolved_date = artwork_date.strip() or exif_date or date.today().isoformat()
     parsed_tags = _parse_tags(tags)
-    clean_title = title.strip() or "Untitled Artwork"
+    clean_title = title.strip()
 
     with get_db(settings.db_path) as conn:
         conn.execute(
@@ -290,8 +305,16 @@ def delete_artwork(
         conn.execute("DELETE FROM artworks WHERE id = ?", (artwork_id,))
         conn.commit()
 
-    (settings.originals_dir / row["original_filename"]).unlink(missing_ok=True)
-    (settings.thumbs_dir / row["thumb_filename"]).unlink(missing_ok=True)
+    orig_file = settings.originals_dir / row["original_filename"]
+    thumb_file = settings.thumbs_dir / row["thumb_filename"]
+    orig_file.unlink(missing_ok=True)
+    thumb_file.unlink(missing_ok=True)
+    for parent, root in ((orig_file.parent, settings.originals_dir), (thumb_file.parent, settings.thumbs_dir)):
+        if parent != root:
+            try:
+                parent.rmdir()
+            except OSError:
+                pass
 
 
 def _safe_file_response(base_dir: Path, filename: str) -> FileResponse:

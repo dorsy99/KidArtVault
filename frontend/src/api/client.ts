@@ -89,6 +89,9 @@ export const api = {
       tag?: string;
       favorite?: boolean;
       q?: string;
+      date_from?: string;
+      date_to?: string;
+      sort?: 'newest' | 'oldest';
       limit?: number;
       offset?: number;
     }) => {
@@ -98,6 +101,9 @@ export const api = {
       if (params.tag) sp.set('tag', params.tag);
       if (params.favorite) sp.set('favorite', 'true');
       if (params.q) sp.set('q', params.q);
+      if (params.date_from) sp.set('date_from', params.date_from);
+      if (params.date_to) sp.set('date_to', params.date_to);
+      if (params.sort) sp.set('sort', params.sort);
       if (params.limit != null) sp.set('limit', String(params.limit));
       if (params.offset != null) sp.set('offset', String(params.offset));
       const qs = sp.toString();

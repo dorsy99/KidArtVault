@@ -1,10 +1,17 @@
 import io
+import re
 from datetime import datetime
 from pathlib import Path
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 THUMB_MAX_SIZE = (800, 800)
+
+
+def sanitize_segment(value: str, fallback: str = "artwork") -> str:
+    """Convert a child name or label into a safe single filesystem path segment."""
+    cleaned = re.sub(r"[^A-Za-z0-9_-]+", "_", value.strip()).strip("_-")
+    return cleaned or fallback
 
 
 def extract_exif_date(img: Image.Image) -> str | None:
@@ -30,6 +37,8 @@ def process_and_save_artwork(
     artwork_id: str,
     originals_dir: Path,
     thumbs_dir: Path,
+    kid_name: str = "",
+    artwork_date: str = "",
 ) -> tuple[str, str, int, int, int, str | None]:
     """
     Validate image, apply EXIF orientation, save full-res original (JPEG/PNG/WebP),
@@ -65,8 +74,15 @@ def process_and_save_artwork(
             img = img.convert("RGB")
 
     width, height = img.size
-    original_filename = f"{artwork_id}.{ext}"
+    folder = sanitize_segment(kid_name, fallback="artwork")
+    date_part = (artwork_date.strip() or exif_date or datetime.now().strftime("%Y-%m-%d")).replace("-", "")
+    time_part = datetime.now().strftime("%H%M%S")
+    slug = sanitize_segment(kid_name.lower(), fallback="art")
+    stem = f"{slug}-{date_part}_{time_part}-{artwork_id[:6]}"
+
+    original_filename = f"{folder}/{stem}.{ext}"
     original_path = originals_dir / original_filename
+    original_path.parent.mkdir(parents=True, exist_ok=True)
 
     save_kwargs: dict = {}
     if ext == "jpg":
@@ -85,8 +101,9 @@ def process_and_save_artwork(
     if thumb.mode not in ("RGB", "RGBA"):
         thumb = thumb.convert("RGB")
 
-    thumb_filename = f"{artwork_id}.webp"
+    thumb_filename = f"{folder}/{stem}.webp"
     thumb_path = thumbs_dir / thumb_filename
+    thumb_path.parent.mkdir(parents=True, exist_ok=True)
     thumb.save(thumb_path, format="WEBP", quality=84, method=4)
 
     return original_filename, thumb_filename, width, height, file_size, exif_date

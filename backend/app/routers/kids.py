@@ -115,5 +115,13 @@ def delete_kid(
         conn.commit()
 
     for art in artworks:
-        (settings.originals_dir / art["original_filename"]).unlink(missing_ok=True)
-        (settings.thumbs_dir / art["thumb_filename"]).unlink(missing_ok=True)
+        orig_file = settings.originals_dir / art["original_filename"]
+        thumb_file = settings.thumbs_dir / art["thumb_filename"]
+        orig_file.unlink(missing_ok=True)
+        thumb_file.unlink(missing_ok=True)
+        for parent, root in ((orig_file.parent, settings.originals_dir), (thumb_file.parent, settings.thumbs_dir)):
+            if parent != root:
+                try:
+                    parent.rmdir()
+                except OSError:
+                    pass
