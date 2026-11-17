@@ -120,7 +120,7 @@ def test_member_role_and_admin_guards(client):
     )
     assert r.status_code == 201
     art = r.json()
-    assert art["title"] == "Untitled Artwork"
+    assert art["title"] == ""
 
     # Switch to viewer and verify viewer cannot mutate artworks
     client.post("/api/auth/logout")

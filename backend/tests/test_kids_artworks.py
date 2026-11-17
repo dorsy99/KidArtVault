@@ -123,7 +123,7 @@ def test_kid_update_cascade_cleanup_and_invalid_uploads(client, tmp_path):
         data={"kid_id": str(kid["id"]), "title": ""},
         files={"file": ("art.png", _make_png_bytes(), "image/png")},
     ).json()
-    assert art["title"] == "Untitled Artwork"
+    assert art["title"] == ""
     kid_orig_files = list((tmp_path / "originals" / "Leonardo").iterdir())
     kid_thumb_files = list((tmp_path / "thumbs" / "Leonardo").iterdir())
     assert len(kid_orig_files) == 1

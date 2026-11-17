@@ -181,7 +181,7 @@ async def upload_artwork(
 
     resolved_date = artwork_date.strip() or exif_date or date.today().isoformat()
     parsed_tags = _parse_tags(tags)
-    clean_title = title.strip() or "Untitled Artwork"
+    clean_title = title.strip()
 
     with get_db(settings.db_path) as conn:
         conn.execute(

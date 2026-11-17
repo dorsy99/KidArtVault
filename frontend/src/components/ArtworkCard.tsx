@@ -40,7 +40,7 @@ export const ArtworkCard: React.FC<ArtworkCardProps> = ({
       >
         <img
           src={thumbUrl}
-          alt={artwork.title}
+          alt={artwork.title || `${artwork.kid_name}'s artwork`}
           loading="lazy"
           style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
         />
@@ -73,17 +73,19 @@ export const ArtworkCard: React.FC<ArtworkCardProps> = ({
       </div>
 
       <div style={{ padding: '10px 12px', display: 'grid', gap: 6 }}>
-        <div
-          style={{
-            fontWeight: 700,
-            fontSize: '0.95rem',
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-          }}
-        >
-          {artwork.title}
-        </div>
+        {artwork.title && (
+          <div
+            style={{
+              fontWeight: 700,
+              fontSize: '0.95rem',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {artwork.title}
+          </div>
+        )}
 
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' }}>
           <span

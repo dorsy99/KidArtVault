@@ -82,7 +82,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
       const filename = croppedBlob ? 'artwork-cropped.jpg' : rawFile?.name || 'artwork.jpg';
       fd.append('file', uploadBlob, filename);
       fd.append('kid_id', String(kidId));
-      fd.append('title', title.trim() || 'Untitled Artwork');
+      fd.append('title', title.trim());
       fd.append('location', location);
       fd.append('artwork_date', artworkDate);
       fd.append('tags', JSON.stringify(tags));
@@ -198,7 +198,7 @@ export const UploadModal: React.FC<UploadModalProps> = ({
               </label>
               <input
                 className="input"
-                placeholder="e.g. Rainbow Dinosaur (or leave blank for Untitled)"
+                placeholder="e.g. Rainbow Dinosaur (or leave blank)"
                 value={title}
                 onChange={(e) => setTitle(e.target.value)}
               />
