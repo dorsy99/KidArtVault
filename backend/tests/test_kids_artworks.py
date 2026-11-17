@@ -133,3 +133,33 @@ def test_kid_update_cascade_cleanup_and_invalid_uploads(client, tmp_path):
     assert client.delete(f"/api/kids/{kid['id']}").status_code == 204
     assert len(list((tmp_path / "originals").iterdir())) == 0
     assert len(list((tmp_path / "thumbs").iterdir())) == 0
+
+
+def test_full_backup_download_admin_only(client):
+    import json
+    import zipfile
+
+    _auth(client)
+    kid = client.post("/api/kids", json={"name": "Maya"}).json()
+    client.post(
+        "/api/artworks",
+        data={"kid_id": str(kid["id"]), "title": "Sunny Day", "location": "Home"},
+        files={"file": ("sun.png", _make_png_bytes(), "image/png")},
+    )
+
+    r = client.get("/api/backup/download")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/zip"
+
+    with zipfile.ZipFile(io.BytesIO(r.content)) as zf:
+        names = zf.namelist()
+        assert "metadata.json" in names
+        assert any(n.startswith("originals/Maya/maya-") for n in names)
+        meta = json.loads(zf.read("metadata.json"))
+        assert meta["artworks"][0]["title"] == "Sunny Day"
+
+    # Non-admin member cannot download full backup
+    client.post("/api/users", json={"username": "member1", "password": "memberpassword1", "role": "member"})
+    client.post("/api/auth/logout")
+    client.post("/api/auth/login", json={"username": "member1", "password": "memberpassword1"})
+    assert client.get("/api/backup/download").status_code == 403

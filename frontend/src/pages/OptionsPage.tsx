@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import {
   Check,
   Copy,
+  Download,
   Edit3,
   KeyRound,
   MapPin,
@@ -26,7 +27,7 @@ interface OptionsPageProps {
   onUserChanged: (user: User) => void;
 }
 
-type SectionTab = 'all' | 'users' | 'children' | 'locations' | 'tags' | 'shares' | 'security';
+type SectionTab = 'all' | 'users' | 'children' | 'locations' | 'tags' | 'shares' | 'backup' | 'security';
 
 export const OptionsPage: React.FC<OptionsPageProps> = ({ user, kids, onKidsChanged, onUserChanged }) => {
   const isAdmin = user.role === 'admin';
@@ -284,6 +285,7 @@ export const OptionsPage: React.FC<OptionsPageProps> = ({ user, kids, onKidsChan
                 ['locations', 'Locations'],
                 ['tags', 'Tags'],
                 ['shares', 'Shares'],
+                ['backup', 'Backup'],
                 ['security', 'Security'],
               ] as const
             ).map(([id, label]) => (
@@ -772,6 +774,25 @@ export const OptionsPage: React.FC<OptionsPageProps> = ({ user, kids, onKidsChan
               })}
             </div>
           )}
+        </section>
+      )}
+
+      {/* Full Backup Subsection (Admin Only) */}
+      {show('backup') && (
+        <section className="card" style={{ padding: 20, display: 'grid', gap: 12 }}>
+          <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
+            <Download size={20} color="var(--accent)" />
+            Full Backup
+          </h2>
+          <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.9rem' }}>
+            Download a compressed <code>.zip</code> archive containing all original artwork images (organized in per-child folders) along with a <code>metadata.json</code> file of titles, dates, locations, tags, and stories.
+          </p>
+          <div>
+            <a href="/api/backup/download" download className="btn btn-primary">
+              <Download size={16} />
+              Download Full Backup (.zip)
+            </a>
+          </div>
         </section>
       )}
 
