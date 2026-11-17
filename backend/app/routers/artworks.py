@@ -31,6 +31,7 @@ def _parse_tags(raw: str | None) -> list[str]:
 
 def _serialize_artwork(row) -> dict:
     d = dict(row)
+    d.pop("medium", None)
     try:
         d["tags"] = json.loads(d.get("tags") or "[]")
     except json.JSONDecodeError:
@@ -148,7 +149,7 @@ async def upload_artwork(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
     if len(raw_bytes) > settings.max_upload_bytes:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=413,
             detail=f"File exceeds maximum size of {settings.max_upload_bytes // (1024 * 1024)}MB.",
         )
 

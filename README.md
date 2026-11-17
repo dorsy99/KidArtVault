@@ -71,7 +71,7 @@ Copy [.env.example](.env.example) to `.env` and configure:
 | Variable | Required | Default | Description |
 | --- | --- | --- | --- |
 | `SECRET_KEY` | **Yes** | — | Long random hex string (`openssl rand -hex 32`) used to sign session & 2FA cookies. |
-| `COOKIE_SECURE` | No | `false` | Set to `true` when serving over HTTPS (Synology Reverse Proxy / Cloudflare Tunnel). |
+| `COOKIE_SECURE` | No | `auto` | `auto` enables `Secure` cookies on HTTPS (reverse proxy) while still allowing local HTTP access via NAS IP. Set `true` to strictly require HTTPS. |
 | `HOST_PORT` | No | `8080` | Host port mapped to container port `8000`. |
 | `TZ` | No | `UTC` | Timezone for container logs and timestamps (e.g. `Australia/Sydney`). |
 | `MAX_UPLOAD_MB` | No | `30` | Maximum upload file size in MB. |
@@ -95,7 +95,7 @@ services:
     environment:
       - DATA_DIR=/data
       - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY in .env}
-      - COOKIE_SECURE=${COOKIE_SECURE:-true}
+      - COOKIE_SECURE=${COOKIE_SECURE:-auto}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-}
       - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-30}
       - TZ=${TZ:-Australia/Sydney}

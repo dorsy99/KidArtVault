@@ -1,6 +1,5 @@
 import React, { useMemo, useState } from 'react';
 import { MapPin, Plus, Tag } from 'lucide-react';
-import { DEFAULT_LOCATIONS, DEFAULT_TAGS } from '../types';
 
 interface TagLocationPickerProps {
   location: string;
@@ -34,12 +33,12 @@ export const TagLocationPicker: React.FC<TagLocationPickerProps> = ({
   const [newTag, setNewTag] = useState('');
 
   const allLocations = useMemo(
-    () => mergeUnique(suggestedLocations.length > 0 ? suggestedLocations : DEFAULT_LOCATIONS, [], location ? [location] : []),
+    () => mergeUnique(suggestedLocations, [], location ? [location] : []),
     [suggestedLocations, location],
   );
 
   const allTags = useMemo(
-    () => mergeUnique(suggestedTags.length > 0 ? suggestedTags : DEFAULT_TAGS, [], tags),
+    () => mergeUnique(suggestedTags, [], tags),
     [suggestedTags, tags],
   );
 

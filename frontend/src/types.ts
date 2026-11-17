@@ -62,26 +62,6 @@ export interface PublicShareData {
   artworks: Artwork[];
 }
 
-export const DEFAULT_LOCATIONS = [
-  'Home',
-  'School',
-  'Kindergarten',
-  'Daycare',
-  'Grandparents',
-  'Holiday',
-];
-
-export const DEFAULT_TAGS = [
-  'A4',
-  'Large Painting',
-  'Animals',
-  'Family',
-  'Gift',
-  'Birthday',
-  'Nature',
-  'School Project',
-];
-
 export const KID_COLORS = [
   '#f28482', // Pastel Coral
   '#7ec8a7', // Pastel Mint
