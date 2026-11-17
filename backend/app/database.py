@@ -30,7 +30,6 @@ CREATE TABLE IF NOT EXISTS artworks (
     kid_id INTEGER NOT NULL REFERENCES kids(id) ON DELETE CASCADE,
     title TEXT NOT NULL,
     notes TEXT NOT NULL DEFAULT '',
-    medium TEXT NOT NULL DEFAULT 'drawing',
     location TEXT NOT NULL DEFAULT '',
     tags TEXT NOT NULL DEFAULT '[]',
     artwork_date TEXT NOT NULL,
@@ -73,12 +72,6 @@ def init_db(db_path: Path) -> None:
     with sqlite3.connect(db_path) as conn:
         conn.execute("PRAGMA journal_mode=WAL;")
         conn.executescript(SCHEMA_SQL)
-        user_cols = {row[1] for row in conn.execute("PRAGMA table_info(users)").fetchall()}
-        if "role" not in user_cols:
-            conn.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'admin'")
-        cols = {row[1] for row in conn.execute("PRAGMA table_info(artworks)").fetchall()}
-        if "location" not in cols:
-            conn.execute("ALTER TABLE artworks ADD COLUMN location TEXT NOT NULL DEFAULT ''")
         opt_count = conn.execute("SELECT COUNT(*) FROM vault_options").fetchone()[0]
         if opt_count == 0:
             conn.executemany(

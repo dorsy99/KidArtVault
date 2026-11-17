@@ -31,7 +31,6 @@ def _parse_tags(raw: str | None) -> list[str]:
 
 def _serialize_artwork(row) -> dict:
     d = dict(row)
-    d.pop("medium", None)
     try:
         d["tags"] = json.loads(d.get("tags") or "[]")
     except json.JSONDecodeError:
