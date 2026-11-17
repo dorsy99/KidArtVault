@@ -21,9 +21,10 @@ def _serialize_public_artwork(row) -> dict:
     except json.JSONDecodeError:
         d["tags"] = []
     d["is_favorite"] = bool(d.get("is_favorite"))
-    # Strip internal filenames from public responses
+    # Strip internal filenames and legacy fields from public responses
     d.pop("original_filename", None)
     d.pop("thumb_filename", None)
+    d.pop("medium", None)
     return d
 
 

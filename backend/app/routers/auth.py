@@ -24,6 +24,7 @@ from app.security import (
     hash_password,
     verify_password,
     verify_pending_2fa_token,
+    verify_session_token,
     verify_totp_code,
 )
 
@@ -58,9 +59,6 @@ def auth_status(request: Request, settings: Settings = Depends(get_settings)) ->
     user = None
     token = request.cookies.get(SESSION_COOKIE_NAME)
     if token and not needs_setup:
-        payload = None
-        from app.security import verify_session_token
-
         payload = verify_session_token(settings, token)
         if payload:
             with get_db(settings.db_path) as conn:
