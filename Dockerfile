@@ -4,7 +4,7 @@ WORKDIR /build
 COPY frontend/package.json frontend/package-lock.json* ./
 RUN npm install --no-audit --no-fund
 COPY frontend/ ./
-RUN npm run build
+RUN npm test && npm run build
 
 # Stage 2: Python FastAPI runtime serving API + built PWA
 FROM python:3.12-slim AS runtime
