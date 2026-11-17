@@ -124,8 +124,11 @@ def test_kid_update_cascade_cleanup_and_invalid_uploads(client, tmp_path):
         files={"file": ("art.png", _make_png_bytes(), "image/png")},
     ).json()
     assert art["title"] == "Untitled Artwork"
-    assert len(list((tmp_path / "originals").iterdir())) == 1
-    assert len(list((tmp_path / "thumbs").iterdir())) == 1
+    kid_orig_files = list((tmp_path / "originals" / "Leonardo").iterdir())
+    kid_thumb_files = list((tmp_path / "thumbs" / "Leonardo").iterdir())
+    assert len(kid_orig_files) == 1
+    assert len(kid_thumb_files) == 1
+    assert kid_orig_files[0].name.startswith("leonardo-")
 
     assert client.delete(f"/api/kids/{kid['id']}").status_code == 204
     assert len(list((tmp_path / "originals").iterdir())) == 0
