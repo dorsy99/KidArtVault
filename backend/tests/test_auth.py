@@ -169,3 +169,32 @@ def test_password_change_2fa_disable_and_rate_limiting(client):
         assert r.status_code == 401
     r = client.post("/api/auth/login", json={"username": "parent", "password": "wrongpassword"})
     assert r.status_code == 429
+
+
+def test_cookie_secure_auto_mode(tmp_path):
+    from fastapi.testclient import TestClient
+    from app.config import Settings
+    from app.main import create_app
+
+    settings = Settings(
+        data_dir=tmp_path,
+        db_path=tmp_path / "auto.db",
+        originals_dir=tmp_path / "originals",
+        thumbs_dir=tmp_path / "thumbs",
+        static_dir=None,
+        secret_key="test-secret-key",
+        cookie_secure=None,
+        allowed_origins=(),
+        max_upload_bytes=1024 * 1024,
+    )
+    app = create_app(settings)
+
+    with TestClient(app, base_url="http://192.168.1.10:8080") as http_client:
+        r = http_client.post("/api/auth/setup", json={"username": "nas", "password": "password123"})
+        assert r.status_code == 201
+        assert "secure" not in r.headers.get("set-cookie", "").lower()
+
+    with TestClient(app, base_url="https://art.example.com") as https_client:
+        r = https_client.post("/api/auth/login", json={"username": "nas", "password": "password123"})
+        assert r.status_code == 200
+        assert "secure" in r.headers.get("set-cookie", "").lower()

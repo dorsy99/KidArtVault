@@ -30,13 +30,19 @@ from app.security import (
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
 
-def _set_session_cookie(response: Response, settings: Settings, token: str) -> None:
+def _is_secure_cookie(settings: Settings, request: Request) -> bool:
+    if settings.cookie_secure is not None:
+        return settings.cookie_secure
+    return request.url.scheme == "https"
+
+
+def _set_session_cookie(response: Response, settings: Settings, request: Request, token: str) -> None:
     response.set_cookie(
         key=SESSION_COOKIE_NAME,
         value=token,
         max_age=settings.session_max_age_seconds,
         httponly=True,
-        secure=settings.cookie_secure,
+        secure=_is_secure_cookie(settings, request),
         samesite="lax",
         path="/",
     )
@@ -77,6 +83,7 @@ def auth_status(request: Request, settings: Settings = Depends(get_settings)) ->
 @router.post("/setup", status_code=status.HTTP_201_CREATED)
 def setup_admin(
     body: SetupRequest,
+    request: Request,
     response: Response,
     settings: Settings = Depends(get_settings),
 ) -> dict:
@@ -98,7 +105,7 @@ def setup_admin(
         user_id = cur.lastrowid
 
     token = create_session_token(settings, user_id, username)
-    _set_session_cookie(response, settings, token)
+    _set_session_cookie(response, settings, request, token)
     return {
         "user": {
             "id": user_id,
@@ -138,7 +145,7 @@ def login(
             value=pending_token,
             max_age=settings.pending_2fa_max_age_seconds,
             httponly=True,
-            secure=settings.cookie_secure,
+            secure=_is_secure_cookie(settings, request),
             samesite="lax",
             path="/",
         )
@@ -146,7 +153,7 @@ def login(
 
     auth_rate_limiter.reset(f"login:{ip}")
     token = create_session_token(settings, row["id"], row["username"])
-    _set_session_cookie(response, settings, token)
+    _set_session_cookie(response, settings, request, token)
     return {
         "requires_2fa": False,
         "user": {
@@ -204,7 +211,7 @@ def verify_2fa(
     auth_rate_limiter.reset(f"login:{ip}")
     response.delete_cookie(PENDING_2FA_COOKIE_NAME, path="/")
     token = create_session_token(settings, row["id"], row["username"])
-    _set_session_cookie(response, settings, token)
+    _set_session_cookie(response, settings, request, token)
     return {
         "user": {
             "id": row["id"],

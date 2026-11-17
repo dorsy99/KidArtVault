@@ -11,7 +11,7 @@ class Settings:
     thumbs_dir: Path
     static_dir: Path | None
     secret_key: str
-    cookie_secure: bool
+    cookie_secure: bool | None
     allowed_origins: tuple[str, ...]
     max_upload_bytes: int
     session_max_age_seconds: int = 60 * 60 * 24 * 30  # 30 days
@@ -28,7 +28,13 @@ def load_settings() -> Settings:
     static_dir = Path(static_env).resolve() if static_env else None
 
     secret_key = os.environ.get("SECRET_KEY", "dev-insecure-secret-change-in-production")
-    cookie_secure = os.environ.get("COOKIE_SECURE", "false").lower() in ("1", "true", "yes")
+    raw_cookie_secure = os.environ.get("COOKIE_SECURE", "auto").strip().lower()
+    if raw_cookie_secure in ("1", "true", "yes"):
+        cookie_secure: bool | None = True
+    elif raw_cookie_secure in ("0", "false", "no"):
+        cookie_secure = False
+    else:
+        cookie_secure = None
 
     raw_origins = os.environ.get("ALLOWED_ORIGINS", "")
     allowed_origins = tuple(o.strip().rstrip("/") for o in raw_origins.split(",") if o.strip())
