@@ -1,10 +1,12 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { Camera, Heart, Search, Users } from 'lucide-react';
+import { Camera, Heart, Search, Users, X } from 'lucide-react';
 import { api } from '../api/client';
 import { ArtworkCard } from '../components/ArtworkCard';
 import { ArtworkDetailModal } from '../components/ArtworkDetailModal';
 import type { Artwork, Kid } from '../types';
+
+const PAGE_SIZE = 30;
 
 interface GalleryPageProps {
   kids: Kid[];
@@ -19,6 +21,7 @@ export const GalleryPage: React.FC<GalleryPageProps> = ({ kids, canEdit, refresh
   const [artworks, setArtworks] = useState<Artwork[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [selectedKidId, setSelectedKidId] = useState<number | null>(
     initialKid && !Number.isNaN(Number(initialKid)) ? Number(initialKid) : null,
   );
@@ -28,20 +31,35 @@ export const GalleryPage: React.FC<GalleryPageProps> = ({ kids, canEdit, refresh
   const [availableTags, setAvailableTags] = useState<string[]>([]);
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [search, setSearch] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [sort, setSort] = useState<'newest' | 'oldest'>('newest');
   const [activeArtwork, setActiveArtwork] = useState<Artwork | null>(null);
 
-  const loadArtworks = useCallback(async () => {
+  const sentinelRef = useRef<HTMLDivElement | null>(null);
+  const loadingMoreRef = useRef(false);
+
+  const buildParams = useCallback(
+    (offset: number) => ({
+      kid_id: selectedKidId,
+      location: locationFilter || undefined,
+      tag: tagFilter || undefined,
+      favorite: favoritesOnly || undefined,
+      q: search.trim() || undefined,
+      date_from: dateFrom || undefined,
+      date_to: dateTo || undefined,
+      sort,
+      limit: PAGE_SIZE,
+      offset,
+    }),
+    [selectedKidId, locationFilter, tagFilter, favoritesOnly, search, dateFrom, dateTo, sort],
+  );
+
+  const loadInitial = useCallback(async () => {
     setLoading(true);
     try {
       const [res, facets] = await Promise.all([
-        api.artworks.list({
-          kid_id: selectedKidId,
-          location: locationFilter || undefined,
-          tag: tagFilter || undefined,
-          favorite: favoritesOnly || undefined,
-          q: search.trim() || undefined,
-          limit: 120,
-        }),
+        api.artworks.list(buildParams(0)),
         api.artworks.facets(),
       ]);
       setArtworks(res.items);
@@ -51,7 +69,25 @@ export const GalleryPage: React.FC<GalleryPageProps> = ({ kids, canEdit, refresh
     } finally {
       setLoading(false);
     }
-  }, [selectedKidId, locationFilter, tagFilter, favoritesOnly, search, refreshKey]);
+  }, [buildParams, refreshKey]);
+
+  const loadMore = useCallback(async () => {
+    if (loadingMoreRef.current || artworks.length >= total) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    try {
+      const res = await api.artworks.list(buildParams(artworks.length));
+      setArtworks((prev) => {
+        const seen = new Set(prev.map((a) => a.id));
+        const next = res.items.filter((a) => !seen.has(a.id));
+        return [...prev, ...next];
+      });
+      setTotal(res.total);
+    } finally {
+      loadingMoreRef.current = false;
+      setLoadingMore(false);
+    }
+  }, [artworks.length, total, buildParams]);
 
   useEffect(() => {
     const param = searchParams.get('kid');
@@ -68,8 +104,23 @@ export const GalleryPage: React.FC<GalleryPageProps> = ({ kids, canEdit, refresh
   };
 
   useEffect(() => {
-    loadArtworks();
-  }, [loadArtworks]);
+    loadInitial();
+  }, [loadInitial]);
+
+  useEffect(() => {
+    const el = sentinelRef.current;
+    if (!el || artworks.length >= total || loading) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          loadMore();
+        }
+      },
+      { rootMargin: '260px' },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [artworks.length, total, loading, loadMore]);
 
   const handleToggleFavorite = async (e: React.MouseEvent, art: Artwork) => {
     e.stopPropagation();
@@ -77,95 +128,148 @@ export const GalleryPage: React.FC<GalleryPageProps> = ({ kids, canEdit, refresh
     setArtworks((prev) => prev.map((a) => (a.id === art.id ? updated : a)));
   };
 
+  const hasFilters = Boolean(
+    selectedKidId || locationFilter || tagFilter || favoritesOnly || search || dateFrom || dateTo,
+  );
+
+  const clearFilters = () => {
+    selectKid(null);
+    setLocationFilter('');
+    setTagFilter('');
+    setFavoritesOnly(false);
+    setSearch('');
+    setDateFrom('');
+    setDateTo('');
+  };
+
   return (
     <div style={{ display: 'grid', gap: 16 }}>
-      {/* Filter bar */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center', justifyContent: 'space-between' }}>
-        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 2 }}>
+      {/* Kid pills */}
+      <div style={{ display: 'flex', gap: 8, overflowX: 'auto', paddingBottom: 2 }}>
+        <button
+          type="button"
+          className={`pill ${selectedKidId === null ? 'active' : ''}`}
+          onClick={() => selectKid(null)}
+        >
+          All Kids
+        </button>
+        {kids.map((kid) => (
           <button
+            key={kid.id}
             type="button"
-            className={`pill ${selectedKidId === null ? 'active' : ''}`}
-            onClick={() => selectKid(null)}
+            className={`pill ${selectedKidId === kid.id ? 'active' : ''}`}
+            onClick={() => selectKid(kid.id)}
           >
-            All Kids
+            <span
+              style={{
+                width: 9,
+                height: 9,
+                borderRadius: '50%',
+                background: kid.color,
+                display: 'inline-block',
+              }}
+            />
+            {kid.name}
           </button>
-          {kids.map((kid) => (
-            <button
-              key={kid.id}
-              type="button"
-              className={`pill ${selectedKidId === kid.id ? 'active' : ''}`}
-              onClick={() => selectKid(kid.id)}
-            >
-              <span
-                style={{
-                  width: 9,
-                  height: 9,
-                  borderRadius: '50%',
-                  background: kid.color,
-                  display: 'inline-block',
-                }}
-              />
-              {kid.name}
-            </button>
-          ))}
+        ))}
+      </div>
+
+      {/* Search, location, tag, date & sort controls */}
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+        <div style={{ position: 'relative', minWidth: 190, flex: '1 1 200px', maxWidth: 280 }}>
+          <Search
+            size={15}
+            style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}
+          />
+          <input
+            className="input"
+            placeholder="Search titles, notes, tags..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{ paddingLeft: 32, paddingTop: 7, paddingBottom: 7, fontSize: '0.88rem' }}
+          />
         </div>
 
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          <div style={{ position: 'relative', minWidth: 190 }}>
-            <Search
-              size={15}
-              style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-muted)' }}
-            />
-            <input
-              className="input"
-              placeholder="Search titles, notes, tags..."
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              style={{ paddingLeft: 32, paddingTop: 7, paddingBottom: 7, fontSize: '0.88rem' }}
-            />
-          </div>
+        <select
+          className="select"
+          value={sort}
+          onChange={(e) => setSort(e.target.value as 'newest' | 'oldest')}
+          aria-label="Sort by date"
+          style={{ width: 'auto', paddingTop: 7, paddingBottom: 7, fontSize: '0.88rem' }}
+        >
+          <option value="newest">Newest first</option>
+          <option value="oldest">Oldest first</option>
+        </select>
 
-          {availableLocations.length > 0 && (
-            <select
-              className="select"
-              value={locationFilter}
-              onChange={(e) => setLocationFilter(e.target.value)}
-              style={{ width: 'auto', paddingTop: 7, paddingBottom: 7, fontSize: '0.88rem' }}
-            >
-              <option value="">All locations</option>
-              {availableLocations.map((loc) => (
-                <option key={loc} value={loc}>
-                  {loc}
-                </option>
-              ))}
-            </select>
-          )}
-
-          {availableTags.length > 0 && (
-            <select
-              className="select"
-              value={tagFilter}
-              onChange={(e) => setTagFilter(e.target.value)}
-              style={{ width: 'auto', paddingTop: 7, paddingBottom: 7, fontSize: '0.88rem' }}
-            >
-              <option value="">All tags</option>
-              {availableTags.map((t) => (
-                <option key={t} value={t}>
-                  #{t}
-                </option>
-              ))}
-            </select>
-          )}
-
-          <button
-            type="button"
-            className={`pill ${favoritesOnly ? 'active' : ''}`}
-            onClick={() => setFavoritesOnly((v) => !v)}
-          >
-            <Heart size={14} fill={favoritesOnly ? '#fff' : 'none'} />
-            Favorites
-          </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+          <input
+            type="date"
+            className="input"
+            aria-label="From date"
+            title="From date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            style={{ width: 'auto', paddingTop: 6, paddingBottom: 6, fontSize: '0.85rem' }}
+          />
+          <span style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>to</span>
+          <input
+            type="date"
+            className="input"
+            aria-label="To date"
+            title="To date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            style={{ width: 'auto', paddingTop: 6, paddingBottom: 6, fontSize: '0.85rem' }}
+          />
         </div>
+
+        {availableLocations.length > 0 && (
+          <select
+            className="select"
+            value={locationFilter}
+            onChange={(e) => setLocationFilter(e.target.value)}
+            style={{ width: 'auto', paddingTop: 7, paddingBottom: 7, fontSize: '0.88rem' }}
+          >
+            <option value="">All locations</option>
+            {availableLocations.map((loc) => (
+              <option key={loc} value={loc}>
+                {loc}
+              </option>
+            ))}
+          </select>
+        )}
+
+        {availableTags.length > 0 && (
+          <select
+            className="select"
+            value={tagFilter}
+            onChange={(e) => setTagFilter(e.target.value)}
+            style={{ width: 'auto', paddingTop: 7, paddingBottom: 7, fontSize: '0.88rem' }}
+          >
+            <option value="">All tags</option>
+            {availableTags.map((t) => (
+              <option key={t} value={t}>
+                #{t}
+              </option>
+            ))}
+          </select>
+        )}
+
+        <button
+          type="button"
+          className={`pill ${favoritesOnly ? 'active' : ''}`}
+          onClick={() => setFavoritesOnly((v) => !v)}
+        >
+          <Heart size={14} fill={favoritesOnly ? '#fff' : 'none'} />
+          Favorites
+        </button>
+
+        {hasFilters && (
+          <button type="button" className="btn btn-ghost" onClick={clearFilters} style={{ padding: '6px 10px', fontSize: '0.84rem' }}>
+            <X size={14} />
+            Clear
+          </button>
+        )}
       </div>
 
       {kids.length === 0 ? (
@@ -186,14 +290,16 @@ export const GalleryPage: React.FC<GalleryPageProps> = ({ kids, canEdit, refresh
           <Camera size={38} color="var(--accent)" />
           <h3 style={{ margin: 0 }}>No artworks found</h3>
           <p style={{ margin: 0, color: 'var(--text-muted)' }}>
-            {search || locationFilter || tagFilter || favoritesOnly || selectedKidId
+            {hasFilters
               ? 'Try clearing your filters or search query.'
               : 'Tap Capture Art to photograph your first A4 drawing or painting!'}
           </p>
-          <button type="button" className="btn btn-primary" onClick={onOpenUpload}>
-            <Camera size={16} />
-            Capture Artwork
-          </button>
+          {canEdit && (
+            <button type="button" className="btn btn-primary" onClick={onOpenUpload}>
+              <Camera size={16} />
+              Capture Artwork
+            </button>
+          )}
         </div>
       ) : (
         <>
@@ -211,6 +317,19 @@ export const GalleryPage: React.FC<GalleryPageProps> = ({ kids, canEdit, refresh
               />
             ))}
           </div>
+
+          {artworks.length < total && (
+            <div ref={sentinelRef} style={{ padding: '16px 0', textAlign: 'center' }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={loadMore}
+                disabled={loadingMore}
+              >
+                {loadingMore ? 'Loading more...' : `Load more (${total - artworks.length} remaining)`}
+              </button>
+            </div>
+          )}
         </>
       )}
 

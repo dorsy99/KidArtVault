@@ -46,6 +46,9 @@ def list_artworks(
     tag: str | None = Query(default=None),
     favorite: bool | None = Query(default=None),
     q: str | None = Query(default=None),
+    date_from: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    date_to: str | None = Query(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    sort: str = Query(default="newest", pattern=r"^(newest|oldest)$"),
     limit: int = Query(default=60, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     user: dict = Depends(get_current_user),
@@ -65,6 +68,12 @@ def list_artworks(
     if tag:
         clauses.append("LOWER(a.tags) LIKE ?")
         params.append(f'%"{tag.strip().lower()}"%')
+    if date_from:
+        clauses.append("a.artwork_date >= ?")
+        params.append(date_from)
+    if date_to:
+        clauses.append("a.artwork_date <= ?")
+        params.append(date_to)
     if q:
         like = f"%{q.strip().lower()}%"
         clauses.append(
@@ -73,6 +82,11 @@ def list_artworks(
         params.extend([like, like, like, like])
 
     where_sql = " AND ".join(clauses)
+    order_sql = (
+        "a.artwork_date ASC, a.created_at ASC"
+        if sort == "oldest"
+        else "a.artwork_date DESC, a.created_at DESC"
+    )
 
     with get_db(settings.db_path) as conn:
         total = conn.execute(
@@ -85,7 +99,7 @@ def list_artworks(
             FROM artworks a
             JOIN kids k ON k.id = a.kid_id
             WHERE {where_sql}
-            ORDER BY a.artwork_date DESC, a.created_at DESC
+            ORDER BY {order_sql}
             LIMIT ? OFFSET ?
             """,
             [*params, limit, offset],
