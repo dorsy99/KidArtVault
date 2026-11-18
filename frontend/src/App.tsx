@@ -41,6 +41,9 @@ function AuthenticatedApp() {
 
   const handleLogout = async () => {
     await api.auth.logout();
+    if (typeof window !== 'undefined' && 'caches' in window) {
+      await window.caches.delete('artwork-thumbs').catch(() => {});
+    }
     setUser(null);
     setNeedsSetup(false);
   };

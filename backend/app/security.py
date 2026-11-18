@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import io
 import time
 from collections import defaultdict
@@ -30,9 +31,21 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
-def create_session_token(settings: Settings, user_id: int, username: str) -> str:
+def password_fingerprint(password_hash: str) -> str:
+    return hashlib.sha256(password_hash.encode("utf-8")).hexdigest()[:16]
+
+
+def create_session_token(
+    settings: Settings,
+    user_id: int,
+    username: str,
+    password_hash: str = "",
+) -> str:
     s = URLSafeTimedSerializer(settings.secret_key, salt="kidart-session-v1")
-    return s.dumps({"uid": user_id, "usr": username})
+    payload: dict = {"uid": user_id, "usr": username}
+    if password_hash:
+        payload["pwh"] = password_fingerprint(password_hash)
+    return s.dumps(payload)
 
 
 def verify_session_token(settings: Settings, token: str) -> dict | None:
@@ -83,7 +96,10 @@ def generate_qr_data_uri(uri: str) -> str:
 def get_client_ip(request: Request) -> str:
     forwarded = request.headers.get("x-forwarded-for")
     if forwarded:
-        return forwarded.split(",")[0].strip()
+        # Use the rightmost IP appended by the reverse proxy rather than the client-spoofable first entry
+        parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+        if parts:
+            return parts[-1]
     real_ip = request.headers.get("x-real-ip")
     if real_ip:
         return real_ip.strip()
@@ -93,18 +109,30 @@ def get_client_ip(request: Request) -> str:
 class RateLimiter:
     """Thread-safe sliding-window rate limiter for auth endpoints."""
 
-    def __init__(self, max_attempts: int = 10, window_seconds: int = 300) -> None:
+    def __init__(self, max_attempts: int = 10, window_seconds: int = 300, max_keys: int = 2048) -> None:
         self.max_attempts = max_attempts
         self.window_seconds = window_seconds
+        self.max_keys = max_keys
         self._attempts: dict[str, list[float]] = defaultdict(list)
         self._lock = Lock()
+
+    def _prune_unlocked(self, cutoff: float) -> None:
+        stale_keys = [k for k, ts in self._attempts.items() if not ts or ts[-1] <= cutoff]
+        for k in stale_keys:
+            self._attempts.pop(k, None)
+        while len(self._attempts) >= self.max_keys:
+            oldest_key = min(self._attempts, key=lambda k: self._attempts[k][-1] if self._attempts[k] else 0.0)
+            self._attempts.pop(oldest_key, None)
 
     def check(self, key: str) -> None:
         now = time.monotonic()
         cutoff = now - self.window_seconds
         with self._lock:
-            recent = [t for t in self._attempts[key] if t > cutoff]
+            if key not in self._attempts and len(self._attempts) >= self.max_keys:
+                self._prune_unlocked(cutoff)
+            recent = [t for t in self._attempts.get(key, []) if t > cutoff]
             if len(recent) >= self.max_attempts:
+                self._attempts[key] = recent
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                     detail="Too many authentication attempts. Please wait a few minutes and try again.",

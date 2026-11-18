@@ -51,7 +51,13 @@ def download_full_backup(
             art["tags"] = []
         art["is_favorite"] = bool(art.get("is_favorite"))
 
-    tmp = tempfile.NamedTemporaryFile(prefix="kidartvault-backup-", suffix=".zip", delete=False)
+    settings.data_dir.mkdir(parents=True, exist_ok=True)
+    tmp = tempfile.NamedTemporaryFile(
+        prefix="kidartvault-backup-",
+        suffix=".zip",
+        dir=settings.data_dir,
+        delete=False,
+    )
     tmp_path = Path(tmp.name)
     tmp.close()
 
@@ -61,13 +67,13 @@ def download_full_backup(
             "kids": kids,
             "artworks": artworks,
         }
-        zf.writestr("metadata.json", json.dumps(metadata, indent=2))
+        zf.writestr("metadata.json", json.dumps(metadata, indent=2), compress_type=zipfile.ZIP_DEFLATED)
 
         if settings.originals_dir.is_dir():
             for file_path in sorted(settings.originals_dir.rglob("*")):
                 if file_path.is_file():
                     rel = file_path.relative_to(settings.originals_dir).as_posix()
-                    zf.write(file_path, arcname=f"originals/{rel}")
+                    zf.write(file_path, arcname=f"originals/{rel}", compress_type=zipfile.ZIP_STORED)
 
     background_tasks.add_task(_cleanup_file, tmp_path)
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")

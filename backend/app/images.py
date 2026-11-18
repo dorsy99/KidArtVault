@@ -6,6 +6,7 @@ from pathlib import Path
 from PIL import Image, ImageOps, UnidentifiedImageError
 
 THUMB_MAX_SIZE = (800, 800)
+Image.MAX_IMAGE_PIXELS = 50_000_000
 
 
 def sanitize_segment(value: str, fallback: str = "artwork") -> str:
@@ -46,13 +47,15 @@ def process_and_save_artwork(
 
     Returns: (original_filename, thumb_filename, width, height, file_size, exif_date)
     """
-    originals_dir.mkdir(parents=True, exist_ok=True)
-    thumbs_dir.mkdir(parents=True, exist_ok=True)
+    originals_root = originals_dir.resolve()
+    thumbs_root = thumbs_dir.resolve()
+    originals_root.mkdir(parents=True, exist_ok=True)
+    thumbs_root.mkdir(parents=True, exist_ok=True)
 
     try:
         img = Image.open(io.BytesIO(raw_bytes))
         img.load()
-    except (UnidentifiedImageError, OSError) as exc:
+    except (UnidentifiedImageError, Image.DecompressionBombError, OSError) as exc:
         raise ValueError("Uploaded file is not a valid image.") from exc
 
     exif_date = extract_exif_date(img)
@@ -75,13 +78,16 @@ def process_and_save_artwork(
 
     width, height = img.size
     folder = sanitize_segment(kid_name, fallback="artwork")
-    date_part = (artwork_date.strip() or exif_date or datetime.now().strftime("%Y-%m-%d")).replace("-", "")
+    raw_date = (artwork_date.strip() or exif_date or datetime.now().strftime("%Y-%m-%d")).replace("-", "")
+    date_part = sanitize_segment(raw_date, fallback=datetime.now().strftime("%Y%m%d"))[:16]
     time_part = datetime.now().strftime("%H%M%S")
     slug = sanitize_segment(kid_name.lower(), fallback="art")
     stem = f"{slug}-{date_part}_{time_part}-{artwork_id[:6]}"
 
     original_filename = f"{folder}/{stem}.{ext}"
-    original_path = originals_dir / original_filename
+    original_path = (originals_root / original_filename).resolve()
+    if originals_root not in original_path.parents:
+        raise ValueError("Invalid destination path for artwork.")
     original_path.parent.mkdir(parents=True, exist_ok=True)
 
     save_kwargs: dict = {}
@@ -102,7 +108,9 @@ def process_and_save_artwork(
         thumb = thumb.convert("RGB")
 
     thumb_filename = f"{folder}/{stem}.webp"
-    thumb_path = thumbs_dir / thumb_filename
+    thumb_path = (thumbs_root / thumb_filename).resolve()
+    if thumbs_root not in thumb_path.parents:
+        raise ValueError("Invalid destination path for thumbnail.")
     thumb_path.parent.mkdir(parents=True, exist_ok=True)
     thumb.save(thumb_path, format="WEBP", quality=84, method=4)
 

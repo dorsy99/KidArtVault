@@ -102,6 +102,8 @@ def delete_kid(
     user: dict = Depends(require_admin),
     settings: Settings = Depends(get_settings),
 ) -> None:
+    from app.routers.artworks import _safe_unlink
+
     with get_db(settings.db_path) as conn:
         existing = conn.execute("SELECT id FROM kids WHERE id = ?", (kid_id,)).fetchone()
         if not existing:
@@ -115,13 +117,5 @@ def delete_kid(
         conn.commit()
 
     for art in artworks:
-        orig_file = settings.originals_dir / art["original_filename"]
-        thumb_file = settings.thumbs_dir / art["thumb_filename"]
-        orig_file.unlink(missing_ok=True)
-        thumb_file.unlink(missing_ok=True)
-        for parent, root in ((orig_file.parent, settings.originals_dir), (thumb_file.parent, settings.thumbs_dir)):
-            if parent != root:
-                try:
-                    parent.rmdir()
-                except OSError:
-                    pass
+        _safe_unlink(settings.originals_dir, art["original_filename"])
+        _safe_unlink(settings.thumbs_dir, art["thumb_filename"])

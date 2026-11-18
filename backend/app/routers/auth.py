@@ -22,6 +22,7 @@ from app.security import (
     get_client_ip,
     get_totp_uri,
     hash_password,
+    password_fingerprint,
     verify_password,
     verify_pending_2fa_token,
     verify_session_token,
@@ -63,12 +64,13 @@ def auth_status(request: Request, settings: Settings = Depends(get_settings)) ->
         if payload:
             with get_db(settings.db_path) as conn:
                 row = conn.execute(
-                    "SELECT id, username, role, totp_enabled, created_at FROM users WHERE id = ?",
+                    "SELECT id, username, role, password_hash, totp_enabled, created_at FROM users WHERE id = ?",
                     (payload["uid"],),
                 ).fetchone()
-            if row:
+            if row and payload.get("pwh") == password_fingerprint(row["password_hash"]):
                 authenticated = True
                 user = dict(row)
+                user.pop("password_hash", None)
                 user["totp_enabled"] = bool(user["totp_enabled"])
 
     return {
@@ -102,7 +104,7 @@ def setup_admin(
         conn.commit()
         user_id = cur.lastrowid
 
-    token = create_session_token(settings, user_id, username)
+    token = create_session_token(settings, user_id, username, pw_hash)
     _set_session_cookie(response, settings, request, token)
     return {
         "user": {
@@ -122,12 +124,15 @@ def login(
     settings: Settings = Depends(get_settings),
 ) -> dict:
     ip = get_client_ip(request)
+    clean_username = body.username.strip()
+    user_key = f"login_user:{clean_username.lower()}"
     auth_rate_limiter.check(f"login:{ip}")
+    auth_rate_limiter.check(user_key)
 
     with get_db(settings.db_path) as conn:
         row = conn.execute(
             "SELECT id, username, role, password_hash, totp_enabled FROM users WHERE username = ?",
-            (body.username.strip(),),
+            (clean_username,),
         ).fetchone()
 
     if not row or not verify_password(body.password, row["password_hash"]):
@@ -150,7 +155,8 @@ def login(
         return {"requires_2fa": True}
 
     auth_rate_limiter.reset(f"login:{ip}")
-    token = create_session_token(settings, row["id"], row["username"])
+    auth_rate_limiter.reset(user_key)
+    token = create_session_token(settings, row["id"], row["username"], row["password_hash"])
     _set_session_cookie(response, settings, request, token)
     return {
         "requires_2fa": False,
@@ -187,9 +193,12 @@ def verify_2fa(
             detail="2FA session expired. Please log in again.",
         )
 
+    user_2fa_key = f"2fa_user:{user_id}"
+    auth_rate_limiter.check(user_2fa_key)
+
     with get_db(settings.db_path) as conn:
         row = conn.execute(
-            "SELECT id, username, role, totp_secret, totp_enabled FROM users WHERE id = ?",
+            "SELECT id, username, role, password_hash, totp_secret, totp_enabled FROM users WHERE id = ?",
             (user_id,),
         ).fetchone()
 
@@ -206,9 +215,11 @@ def verify_2fa(
         )
 
     auth_rate_limiter.reset(f"2fa:{ip}")
+    auth_rate_limiter.reset(user_2fa_key)
     auth_rate_limiter.reset(f"login:{ip}")
+    auth_rate_limiter.reset(f"login_user:{row['username'].lower()}")
     response.delete_cookie(PENDING_2FA_COOKIE_NAME, path="/")
-    token = create_session_token(settings, row["id"], row["username"])
+    token = create_session_token(settings, row["id"], row["username"], row["password_hash"])
     _set_session_cookie(response, settings, request, token)
     return {
         "user": {
@@ -297,6 +308,8 @@ def disable_2fa(
 @router.post("/change-password")
 def change_password(
     body: ChangePasswordRequest,
+    request: Request,
+    response: Response,
     user: dict = Depends(get_current_user),
     settings: Settings = Depends(get_settings),
 ) -> dict:
@@ -316,4 +329,6 @@ def change_password(
             (new_hash, user["id"]),
         )
         conn.commit()
+    token = create_session_token(settings, user["id"], user["username"], new_hash)
+    _set_session_cookie(response, settings, request, token)
     return {"ok": True}

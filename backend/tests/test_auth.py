@@ -198,3 +198,74 @@ def test_cookie_secure_auto_mode(tmp_path):
         r = https_client.post("/api/auth/login", json={"username": "nas", "password": "password123"})
         assert r.status_code == 200
         assert "secure" in r.headers.get("set-cookie", "").lower()
+
+
+def test_session_invalidated_on_password_change_and_csrf_origin(client):
+    r = client.post("/api/auth/setup", json={"username": "parent", "password": "supersecurepassword"})
+    assert r.status_code == 201
+    assert "content-security-policy" in r.headers
+    old_cookie = client.cookies.get("kidart_session")
+    assert old_cookie
+
+    # Cross-origin state-changing request is blocked by Origin check
+    r_csrf = client.post(
+        "/api/kids",
+        json={"name": "Blocked"},
+        headers={"Origin": "https://evil.example.com"},
+    )
+    assert r_csrf.status_code == 403
+
+    # Same-origin request succeeds
+    r_same = client.post(
+        "/api/kids",
+        json={"name": "Allowed"},
+        headers={"Origin": "http://testserver"},
+    )
+    assert r_same.status_code == 201
+
+    # Change password rotates the current session cookie and invalidates the old token
+    r_pw = client.post(
+        "/api/auth/change-password",
+        json={"current_password": "supersecurepassword", "new_password": "brandnewpassword123"},
+    )
+    assert r_pw.status_code == 200
+    new_cookie = client.cookies.get("kidart_session")
+    assert new_cookie != old_cookie
+    assert client.get("/api/kids").status_code == 200
+
+    # Presenting the old pre-password-change cookie is rejected
+    client.cookies.set("kidart_session", old_cookie)
+    assert client.get("/api/kids").status_code == 401
+    assert client.get("/api/auth/status").json()["authenticated"] is False
+
+
+def test_rate_limit_blocks_rotating_x_forwarded_for_and_persists_secret_key(client, tmp_path, monkeypatch):
+    from app.config import load_settings
+
+    client.post("/api/auth/setup", json={"username": "parent", "password": "supersecurepassword"})
+    client.post("/api/auth/logout")
+
+    # Even if an attacker rotates X-Forwarded-For on every request, per-username rate limiting blocks brute-forcing
+    for i in range(12):
+        r = client.post(
+            "/api/auth/login",
+            json={"username": "parent", "password": "wrongpassword"},
+            headers={"X-Forwarded-For": f"203.0.113.{i + 1}"},
+        )
+        assert r.status_code == 401
+
+    r_blocked = client.post(
+        "/api/auth/login",
+        json={"username": "parent", "password": "wrongpassword"},
+        headers={"X-Forwarded-For": "198.51.100.99"},
+    )
+    assert r_blocked.status_code == 429
+
+    # Verify placeholder SECRET_KEY is replaced and persisted in DATA_DIR/.secret_key
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "vault_data"))
+    monkeypatch.setenv("SECRET_KEY", "change-me-to-a-long-random-hex-string-at-least-32-chars")
+    s1 = load_settings()
+    s2 = load_settings()
+    assert len(s1.secret_key) == 64
+    assert s1.secret_key == s2.secret_key
+    assert (tmp_path / "vault_data" / ".secret_key").is_file()
