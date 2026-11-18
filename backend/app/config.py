@@ -56,6 +56,7 @@ class Settings:
     cookie_secure: bool | None
     allowed_origins: tuple[str, ...]
     max_upload_bytes: int
+    forwarded_allow_ips: str = "127.0.0.1,::1"
     session_max_age_seconds: int = 60 * 60 * 24 * 30  # 30 days
     pending_2fa_max_age_seconds: int = 60 * 5  # 5 minutes
 
@@ -82,6 +83,7 @@ def load_settings() -> Settings:
     allowed_origins = tuple(o.strip().rstrip("/") for o in raw_origins.split(",") if o.strip())
 
     max_upload_mb = int(os.environ.get("MAX_UPLOAD_MB", "30"))
+    forwarded_allow_ips = os.environ.get("FORWARDED_ALLOW_IPS", "127.0.0.1,::1").strip() or "127.0.0.1,::1"
 
     return Settings(
         data_dir=data_dir,
@@ -93,4 +95,5 @@ def load_settings() -> Settings:
         cookie_secure=cookie_secure,
         allowed_origins=allowed_origins,
         max_upload_bytes=max_upload_mb * 1024 * 1024,
+        forwarded_allow_ips=forwarded_allow_ips,
     )

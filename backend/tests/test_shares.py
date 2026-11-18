@@ -69,3 +69,32 @@ def test_share_links_are_scoped_and_revocable(client):
         )
         conn.commit()
     assert client.get(f"/api/public/share/{expired_token}").status_code == 410
+
+
+def test_public_share_rate_limiting(client):
+    from app.security import share_miss_rate_limiter, share_rate_limiter
+
+    client.post("/api/auth/setup", json={"username": "parent", "password": "supersecurepassword"})
+    kid = client.post("/api/kids", json={"name": "Leo"}).json()
+    art = client.post(
+        "/api/artworks",
+        data={"kid_id": str(kid["id"]), "title": "Sun"},
+        files={"file": ("sun.jpg", _make_jpg_bytes(), "image/jpeg")},
+    ).json()
+    token = client.post("/api/shares", json={"label": "Family", "kid_id": kid["id"]}).json()["token"]
+
+    # Repeated valid metadata requests are rate-limited after share_rate_limiter.max_attempts
+    for _ in range(share_rate_limiter.max_attempts):
+        assert client.get(f"/api/public/share/{token}").status_code == 200
+    assert client.get(f"/api/public/share/{token}").status_code == 429
+
+    # Thumbnail/image endpoint still works with its separate higher media budget
+    assert client.get(f"/api/public/share/{token}/artworks/{art['id']}/thumb").status_code == 200
+
+    # Clear limiters and verify invalid token guessing hits 429 across all public share endpoints
+    share_rate_limiter._attempts.clear()
+    for i in range(share_miss_rate_limiter.max_attempts):
+        assert client.get(f"/api/public/share/bad-token-{i}").status_code == 404
+    assert client.get("/api/public/share/bad-token-next").status_code == 429
+    assert client.get(f"/api/public/share/{token}").status_code == 429
+    assert client.get(f"/api/public/share/{token}/artworks/{art['id']}/thumb").status_code == 429

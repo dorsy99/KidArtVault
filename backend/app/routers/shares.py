@@ -2,7 +2,7 @@ import json
 import secrets
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import FileResponse
 
 from app.config import Settings
@@ -10,6 +10,12 @@ from app.database import get_db
 from app.deps import get_settings, require_admin
 from app.models import ShareCreate
 from app.routers.artworks import _safe_file_response
+from app.security import (
+    get_client_ip,
+    share_media_rate_limiter,
+    share_miss_rate_limiter,
+    share_rate_limiter,
+)
 
 router = APIRouter(tags=["shares"])
 
@@ -27,7 +33,7 @@ def _serialize_public_artwork(row) -> dict:
     return d
 
 
-def _validate_share_token(conn, token: str) -> dict:
+def _validate_share_token(conn, token: str, client_ip: str | None = None) -> dict:
     share = conn.execute(
         """
         SELECT s.*, k.name AS kid_name
@@ -38,6 +44,8 @@ def _validate_share_token(conn, token: str) -> dict:
         (token,),
     ).fetchone()
     if not share:
+        if client_ip:
+            share_miss_rate_limiter.check(f"share_miss:{client_ip}")
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Share link not found or revoked")
 
     if share["expires_at"]:
@@ -45,6 +53,8 @@ def _validate_share_token(conn, token: str) -> dict:
         if expires.tzinfo is None:
             expires = expires.replace(tzinfo=timezone.utc)
         if datetime.now(timezone.utc) > expires:
+            if client_ip:
+                share_miss_rate_limiter.check(f"share_miss:{client_ip}")
             raise HTTPException(status_code=status.HTTP_410_GONE, detail="This share link has expired")
 
     return dict(share)
@@ -130,10 +140,15 @@ def revoke_share(
 @router.get("/api/public/share/{token}")
 def get_public_share(
     token: str,
+    request: Request,
     settings: Settings = Depends(get_settings),
 ) -> dict:
+    ip = get_client_ip(request)
+    share_miss_rate_limiter.ensure_not_limited(f"share_miss:{ip}")
+    share_rate_limiter.check(f"share:{ip}")
+
     with get_db(settings.db_path) as conn:
-        share = _validate_share_token(conn, token)
+        share = _validate_share_token(conn, token, client_ip=ip)
 
         if share["artwork_id"]:
             rows = conn.execute(
@@ -176,9 +191,23 @@ def get_public_share(
     }
 
 
-def _get_scoped_artwork_file(settings: Settings, token: str, artwork_id: str, column: str, base_dir) -> FileResponse:
+def _get_scoped_artwork_file(
+    request: Request,
+    settings: Settings,
+    token: str,
+    artwork_id: str,
+    column: str,
+    base_dir,
+) -> FileResponse:
+    if column not in ("thumb_filename", "original_filename"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid media type")
+
+    ip = get_client_ip(request)
+    share_miss_rate_limiter.ensure_not_limited(f"share_miss:{ip}")
+    share_media_rate_limiter.check(f"share_media:{ip}")
+
     with get_db(settings.db_path) as conn:
-        share = _validate_share_token(conn, token)
+        share = _validate_share_token(conn, token, client_ip=ip)
         if share["artwork_id"] and share["artwork_id"] != artwork_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Artwork not in share scope")
         if share["kid_id"]:
@@ -200,15 +229,17 @@ def _get_scoped_artwork_file(settings: Settings, token: str, artwork_id: str, co
 def get_public_share_thumb(
     token: str,
     artwork_id: str,
+    request: Request,
     settings: Settings = Depends(get_settings),
 ) -> FileResponse:
-    return _get_scoped_artwork_file(settings, token, artwork_id, "thumb_filename", settings.thumbs_dir)
+    return _get_scoped_artwork_file(request, settings, token, artwork_id, "thumb_filename", settings.thumbs_dir)
 
 
 @router.get("/api/public/share/{token}/artworks/{artwork_id}/image")
 def get_public_share_image(
     token: str,
     artwork_id: str,
+    request: Request,
     settings: Settings = Depends(get_settings),
 ) -> FileResponse:
-    return _get_scoped_artwork_file(settings, token, artwork_id, "original_filename", settings.originals_dir)
+    return _get_scoped_artwork_file(request, settings, token, artwork_id, "original_filename", settings.originals_dir)
