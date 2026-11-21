@@ -108,7 +108,7 @@ export const ShareModal: React.FC<ShareModalProps> = ({
         ) : (
           <div style={{ display: 'grid', gap: 12 }}>
             <div className="success-banner">
-              Anyone with this link can view {artworkId ? 'this artwork' : kidId ? 'this child’s gallery' : 'the gallery'} in read-only mode. You can revoke it anytime in Security &amp; Shares.
+              Anyone with this link can view {artworkId ? 'this artwork' : kidId ? 'this child’s gallery' : 'the gallery'} in read-only mode. You can manage or revoke it anytime in Options → Shares.
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <input className="input" readOnly value={shareUrl} onFocus={(e) => e.target.select()} />
