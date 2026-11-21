@@ -105,10 +105,12 @@ function AuthenticatedApp() {
         <UploadModal
           kids={kids}
           onClose={() => setShowUpload(false)}
-          onUploaded={() => {
-            setShowUpload(false);
+          onUploaded={(_artwork, options) => {
             loadKids();
             setRefreshKey((k) => k + 1);
+            if (!options?.keepOpen) {
+              setShowUpload(false);
+            }
           }}
         />
       )}
