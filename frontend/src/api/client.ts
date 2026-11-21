@@ -178,4 +178,18 @@ export const api = {
       }),
     remove: (id: number) => request<void>(`/api/users/${id}`, { method: 'DELETE' }),
   },
+
+  backup: {
+    restore: (file: File) => {
+      const fd = new FormData();
+      fd.append('file', file);
+      return request<{ restored_kids: number; restored_artworks: number; skipped_artworks: number }>(
+        '/api/backup/restore',
+        {
+          method: 'POST',
+          body: fd,
+        },
+      );
+    },
+  },
 };

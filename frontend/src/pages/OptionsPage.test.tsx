@@ -72,4 +72,36 @@ describe('OptionsPage shares management', () => {
     });
     expect(screen.getByText('School Share')).toBeInTheDocument();
   });
+
+  it('restores a backup zip and triggers onKidsChanged', async () => {
+    vi.spyOn(api.users, 'list').mockResolvedValue([adminUser]);
+    vi.spyOn(api.options, 'get').mockResolvedValue({ locations: [], tags: [] });
+    vi.spyOn(api.shares, 'list').mockResolvedValue([]);
+    const restoreSpy = vi.spyOn(api.backup, 'restore').mockResolvedValue({
+      restored_kids: 2,
+      restored_artworks: 5,
+      skipped_artworks: 1,
+    });
+    vi.spyOn(window, 'confirm').mockReturnValue(true);
+    const onKidsChanged = vi.fn();
+
+    const { container } = render(
+      <OptionsPage
+        user={adminUser}
+        kids={[]}
+        onKidsChanged={onKidsChanged}
+        onUserChanged={vi.fn()}
+      />,
+    );
+
+    const zipInput = container.querySelector('input[type="file"][accept*=".zip"]') as HTMLInputElement;
+    const backupFile = new File(['zipdata'], 'kidartvault-backup.zip', { type: 'application/zip' });
+    fireEvent.change(zipInput, { target: { files: [backupFile] } });
+
+    await waitFor(() => {
+      expect(restoreSpy).toHaveBeenCalledWith(backupFile);
+    });
+    expect(await screen.findByText(/2 children and 5 artworks restored \(1 skipped\)/i)).toBeInTheDocument();
+    expect(onKidsChanged).toHaveBeenCalledTimes(1);
+  });
 });
