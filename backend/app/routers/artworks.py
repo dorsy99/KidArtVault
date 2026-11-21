@@ -374,11 +374,20 @@ def delete_artwork(
     _safe_unlink(settings.thumbs_dir, row["thumb_filename"])
 
 
+_IMAGE_MEDIA_TYPES = {
+    ".webp": "image/webp",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".png": "image/png",
+}
+
+
 def _safe_file_response(base_dir: Path, filename: str) -> FileResponse:
     target = (base_dir / filename).resolve()
     if base_dir.resolve() not in target.parents or not target.is_file():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-    return FileResponse(target, headers={"Cache-Control": "private, max-age=86400"})
+    media_type = _IMAGE_MEDIA_TYPES.get(target.suffix.lower())
+    return FileResponse(target, media_type=media_type, headers={"Cache-Control": "private, max-age=86400"})
 
 
 @router.get("/{artwork_id}/image")
