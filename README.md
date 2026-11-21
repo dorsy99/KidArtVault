@@ -152,24 +152,3 @@ cd frontend
 npm install
 npm run dev
 ```
-
----
-
-## GitHub & Automatic Docker Hub Releases
-
-This repository includes two GitHub Actions workflows:
-- [ci.yml](.github/workflows/ci.yml): Runs `pytest` and builds the React PWA on every push/PR to `main`.
-- [release.yml](.github/workflows/release.yml): On any `v*` tag (e.g. `v1.0.0`), runs tests, builds a multi-architecture (`linux/amd64` + `linux/arm64`) Docker image, pushes it to [`dorsy99/kidartvault`](https://hub.docker.com/r/dorsy99/kidartvault), and creates a GitHub Release on [`dorsy99/KidArtVault`](https://github.com/dorsy99/KidArtVault).
-
-### One-Time Setup
-1. Push this repo to GitHub (`main` branch).
-2. In Docker Hub, create an Access Token (**Account Settings → Personal access tokens**).
-3. In your GitHub repository, go to **Settings → Secrets and variables → Actions** and add:
-   - `DOCKERHUB_USERNAME` — your Docker Hub username
-   - `DOCKERHUB_TOKEN` — your Docker Hub access token
-
-### Publishing a New Release
-```bash
-git tag v1.0.0
-git push origin v1.0.0
-```
