@@ -189,3 +189,15 @@ def test_artwork_date_filter_sort_and_pagination(client):
     r3 = client.get("/api/artworks", params={"date_from": "2026-02-01", "date_to": "2026-02-28"})
     assert r3.json()["total"] == 1
     assert r3.json()["items"][0]["title"] == "Feb Art"
+
+    # Reject path traversal or malformed artwork_date on upload
+    r_bad_date = client.post(
+        "/api/artworks",
+        data={"kid_id": str(kid["id"]), "title": "Traversal", "artwork_date": "../../evil"},
+        files={"file": ("art.png", _make_png_bytes(), "image/png")},
+    )
+    assert r_bad_date.status_code == 422
+
+    # SQL LIKE wildcards (% and _) in search query or tag filter do not match arbitrary records
+    assert client.get("/api/artworks", params={"q": "%"}).json()["total"] == 0
+    assert client.get("/api/artworks", params={"tag": "%"}).json()["total"] == 0

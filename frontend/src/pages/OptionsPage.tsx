@@ -12,6 +12,7 @@ import {
   ShieldOff,
   Tag,
   Trash2,
+  Upload,
   UserPlus,
   Users,
   X,
@@ -62,6 +63,14 @@ export const OptionsPage: React.FC<OptionsPageProps> = ({ user, kids, onKidsChan
   // Shares state
   const [shares, setShares] = useState<ShareLink[]>([]);
   const [showNewShare, setShowNewShare] = useState(false);
+  const [shareErr, setShareErr] = useState('');
+  const [copiedShareToken, setCopiedShareToken] = useState<string | null>(null);
+  const [revokingToken, setRevokingToken] = useState<string | null>(null);
+
+  // Backup restore state
+  const [restoring, setRestoring] = useState(false);
+  const [restoreMsg, setRestoreMsg] = useState('');
+  const [restoreErr, setRestoreErr] = useState('');
 
   // 2FA setup state
   const [setup2fa, setSetup2fa] = useState<{ secret: string; qr_data_uri: string } | null>(null);
@@ -80,11 +89,17 @@ export const OptionsPage: React.FC<OptionsPageProps> = ({ user, kids, onKidsChan
   useEffect(() => {
     if (!isAdmin) return;
     api.users.list().then(setUsers).catch(() => {});
-    api.options.get().then((res) => {
-      setLocations(res.locations);
-      setTags(res.tags);
-    });
-    api.shares.list().then(setShares);
+    api.options
+      .get()
+      .then((res) => {
+        setLocations(res.locations);
+        setTags(res.tags);
+      })
+      .catch(() => {});
+    api.shares
+      .list()
+      .then(setShares)
+      .catch((err) => setShareErr(err instanceof Error ? err.message : 'Failed to load share links'));
   }, [isAdmin]);
 
   const handleCreateUser = async (e: React.FormEvent) => {
@@ -261,9 +276,60 @@ export const OptionsPage: React.FC<OptionsPageProps> = ({ user, kids, onKidsChan
     }
   };
 
-  const handleRevoke = async (token: string) => {
-    await api.shares.revoke(token);
-    setShares((prev) => prev.filter((s) => s.token !== token));
+  const handleRevoke = async (share: ShareLink) => {
+    const label = share.label || 'Family Share';
+    if (!confirm(`Revoke share link "${label}"? Anyone with this link will immediately lose access.`)) {
+      return;
+    }
+    setShareErr('');
+    setRevokingToken(share.token);
+    try {
+      await api.shares.revoke(share.token);
+      setShares((prev) => prev.filter((s) => s.token !== share.token));
+    } catch (err) {
+      setShareErr(err instanceof Error ? err.message : 'Failed to revoke share link');
+    } finally {
+      setRevokingToken(null);
+    }
+  };
+
+  const handleCopyShare = async (token: string, url: string) => {
+    try {
+      await navigator.clipboard.writeText(url);
+      setCopiedShareToken(token);
+      setTimeout(() => {
+        setCopiedShareToken((curr) => (curr === token ? null : curr));
+      }, 2000);
+    } catch {
+      setShareErr('Could not copy link to clipboard.');
+    }
+  };
+
+  const handleRestoreBackup = async (file: File | undefined) => {
+    if (!file) return;
+    if (
+      !confirm(
+        `Restore artworks and children from "${file.name}"? Existing records will be kept and missing items will be restored with regenerated thumbnails.`,
+      )
+    ) {
+      return;
+    }
+    setRestoring(true);
+    setRestoreMsg('');
+    setRestoreErr('');
+    try {
+      const res = await api.backup.restore(file);
+      setRestoreMsg(
+        `Restore complete: ${res.restored_kids} ${res.restored_kids === 1 ? 'child' : 'children'} and ${res.restored_artworks} ${res.restored_artworks === 1 ? 'artwork' : 'artworks'} restored` +
+          (res.skipped_artworks > 0 ? ` (${res.skipped_artworks} skipped)` : '') +
+          '.',
+      );
+      onKidsChanged();
+    } catch (err) {
+      setRestoreErr(err instanceof Error ? err.message : 'Failed to restore backup');
+    } finally {
+      setRestoring(false);
+    }
   };
 
   const show = (tab: Exclude<SectionTab, 'all'>) => {
@@ -284,7 +350,7 @@ export const OptionsPage: React.FC<OptionsPageProps> = ({ user, kids, onKidsChan
                 ['children', 'Children'],
                 ['locations', 'Locations'],
                 ['tags', 'Tags'],
-                ['shares', 'Shares'],
+                ['shares', shares.length > 0 ? `Shares (${shares.length})` : 'Shares'],
                 ['backup', 'Backup'],
                 ['security', 'Security'],
               ] as const
@@ -712,13 +778,15 @@ export const OptionsPage: React.FC<OptionsPageProps> = ({ user, kids, onKidsChan
         <section className="card" style={{ padding: 20, display: 'grid', gap: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 8 }}>
             <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-              <Share2 size={20} />
+              <Share2 size={20} color="var(--accent)" />
               Read-Only Family Share Links
             </h2>
             <button type="button" className="btn btn-primary" onClick={() => setShowNewShare(true)}>
               Create Gallery Link
             </button>
           </div>
+
+          {shareErr && <div className="error-banner">{shareErr}</div>}
 
           {shares.length === 0 ? (
             <div style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>
@@ -728,6 +796,17 @@ export const OptionsPage: React.FC<OptionsPageProps> = ({ user, kids, onKidsChan
             <div style={{ display: 'grid', gap: 8 }}>
               {shares.map((s) => {
                 const url = `${window.location.origin}/s/${s.token}`;
+                const isExpired = Boolean(s.expires_at && new Date(s.expires_at).getTime() < Date.now());
+                const scopeLabel = s.artwork_id
+                  ? s.artwork_title
+                    ? `Artwork "${s.artwork_title}"`
+                    : 'Single Artwork'
+                  : s.kid_name
+                    ? `${s.kid_name}'s Gallery`
+                    : 'Full Gallery';
+                const isCopied = copiedShareToken === s.token;
+                const isRevoking = revokingToken === s.token;
+
                 return (
                   <div
                     key={s.token}
@@ -742,31 +821,47 @@ export const OptionsPage: React.FC<OptionsPageProps> = ({ user, kids, onKidsChan
                       flexWrap: 'wrap',
                     }}
                   >
-                    <div>
-                      <div style={{ fontWeight: 700 }}>{s.label || 'Family Share'}</div>
+                    <div style={{ display: 'grid', gap: 2 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                        <span style={{ fontWeight: 700 }}>{s.label || 'Family Share'}</span>
+                        <span
+                          className="badge"
+                          style={{
+                            background: isExpired ? '#fdecec' : '#eaf6ef',
+                            color: isExpired ? '#9b1c1c' : '#1c6b3a',
+                          }}
+                        >
+                          {isExpired ? 'Expired' : 'Active'}
+                        </span>
+                      </div>
                       <div style={{ fontSize: '0.82rem', color: 'var(--text-muted)' }}>
-                        Scope: {s.artwork_title ? `Artwork "${s.artwork_title}"` : s.kid_name ? `${s.kid_name}'s Gallery` : 'Full Gallery'}
-                        {s.expires_at ? ` · Expires ${s.expires_at.slice(0, 10)}` : ' · No expiration'}
+                        Scope: {scopeLabel}
+                        {s.expires_at
+                          ? ` · ${isExpired ? 'Expired' : 'Expires'} ${s.expires_at.slice(0, 10)}`
+                          : ' · No expiration'}
+                        {s.created_at ? ` · Created ${s.created_at.slice(0, 10)}` : ''}
                       </div>
                     </div>
-                    <div style={{ display: 'flex', gap: 6 }}>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                       <button
                         type="button"
                         className="btn btn-secondary"
-                        onClick={() => navigator.clipboard.writeText(url)}
+                        onClick={() => handleCopyShare(s.token, url)}
                         style={{ padding: '6px 10px', fontSize: '0.82rem' }}
                       >
-                        <Copy size={14} />
-                        Copy URL
+                        {isCopied ? <Check size={14} /> : <Copy size={14} />}
+                        {isCopied ? 'Copied' : 'Copy URL'}
                       </button>
                       <button
                         type="button"
                         className="btn btn-ghost"
-                        style={{ color: 'var(--danger)', padding: '6px 10px' }}
-                        onClick={() => handleRevoke(s.token)}
+                        style={{ color: 'var(--danger)', padding: '6px 10px', fontSize: '0.82rem' }}
+                        onClick={() => handleRevoke(s)}
+                        disabled={isRevoking}
                         title="Revoke link"
                       >
                         <Trash2 size={15} />
+                        {isRevoking ? 'Revoking...' : 'Revoke'}
                       </button>
                     </div>
                   </div>
@@ -779,10 +874,10 @@ export const OptionsPage: React.FC<OptionsPageProps> = ({ user, kids, onKidsChan
 
       {/* Full Backup Subsection (Admin Only) */}
       {show('backup') && (
-        <section className="card" style={{ padding: 20, display: 'grid', gap: 12 }}>
+        <section className="card" style={{ padding: 20, display: 'grid', gap: 14 }}>
           <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
             <Download size={20} color="var(--accent)" />
-            Full Backup
+            Backup &amp; Restore
           </h2>
           <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.9rem' }}>
             Download a compressed <code>.zip</code> archive containing all original artwork images (organized in per-child folders) along with a <code>metadata.json</code> file of titles, dates, locations, tags, and stories.
@@ -792,6 +887,37 @@ export const OptionsPage: React.FC<OptionsPageProps> = ({ user, kids, onKidsChan
               <Download size={16} />
               Download Full Backup (.zip)
             </a>
+          </div>
+
+          <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '4px 0' }} />
+
+          <div style={{ display: 'grid', gap: 10 }}>
+            <div style={{ fontWeight: 700, fontSize: '0.98rem' }}>Restore from Backup (.zip)</div>
+            <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.88rem' }}>
+              Upload a KidArtVault backup <code>.zip</code> to restore missing child profiles, artwork records, and original images. WebP thumbnails are regenerated automatically; existing artworks are not overwritten.
+            </p>
+            {restoreMsg && <div className="success-banner">{restoreMsg}</div>}
+            {restoreErr && <div className="error-banner">{restoreErr}</div>}
+            <div>
+              <label
+                className={`btn btn-secondary ${restoring ? 'disabled' : ''}`}
+                style={{ cursor: restoring ? 'not-allowed' : 'pointer', opacity: restoring ? 0.65 : 1 }}
+              >
+                <Upload size={16} />
+                {restoring ? 'Restoring Backup...' : 'Upload Backup (.zip)'}
+                <input
+                  type="file"
+                  accept=".zip,application/zip"
+                  disabled={restoring}
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = '';
+                    handleRestoreBackup(file);
+                  }}
+                />
+              </label>
+            </div>
           </div>
         </section>
       )}

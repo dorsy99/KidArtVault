@@ -1,5 +1,7 @@
 import base64
+import hashlib
 import io
+import ipaddress
 import time
 from collections import defaultdict
 from threading import Lock
@@ -30,9 +32,21 @@ def verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
-def create_session_token(settings: Settings, user_id: int, username: str) -> str:
+def password_fingerprint(password_hash: str) -> str:
+    return hashlib.sha256(password_hash.encode("utf-8")).hexdigest()[:16]
+
+
+def create_session_token(
+    settings: Settings,
+    user_id: int,
+    username: str,
+    password_hash: str = "",
+) -> str:
     s = URLSafeTimedSerializer(settings.secret_key, salt="kidart-session-v1")
-    return s.dumps({"uid": user_id, "usr": username})
+    payload: dict = {"uid": user_id, "usr": username}
+    if password_hash:
+        payload["pwh"] = password_fingerprint(password_hash)
+    return s.dumps(payload)
 
 
 def verify_session_token(settings: Settings, token: str) -> dict | None:
@@ -80,34 +94,111 @@ def generate_qr_data_uri(uri: str) -> str:
     return f"data:image/png;base64,{b64}"
 
 
-def get_client_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    real_ip = request.headers.get("x-real-ip")
-    if real_ip:
-        return real_ip.strip()
-    return request.client.host if request.client else "unknown"
+def _is_trusted_proxy(host: str | None, forwarded_allow_ips: str) -> bool:
+    entries = [item.strip() for item in forwarded_allow_ips.split(",") if item.strip()]
+    if "*" in entries:
+        return True
+    if not host:
+        return False
+
+    parsed_host = None
+    try:
+        parsed_host = ipaddress.ip_address(host)
+    except ValueError:
+        pass
+
+    for entry in entries:
+        if "/" in entry and parsed_host is not None:
+            try:
+                if parsed_host in ipaddress.ip_network(entry, strict=False):
+                    return True
+            except ValueError:
+                continue
+        elif parsed_host is not None:
+            try:
+                if parsed_host == ipaddress.ip_address(entry):
+                    return True
+            except ValueError:
+                if host == entry:
+                    return True
+        elif host == entry:
+            return True
+    return False
+
+
+def get_client_ip(request: Request, forwarded_allow_ips: str | None = None) -> str:
+    client_host = request.client.host if request.client else None
+    if forwarded_allow_ips is None:
+        app_state = getattr(getattr(request, "app", None), "state", None)
+        settings = getattr(app_state, "settings", None)
+        forwarded_allow_ips = getattr(settings, "forwarded_allow_ips", "127.0.0.1,::1")
+
+    if _is_trusted_proxy(client_host, forwarded_allow_ips):
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            parts = [p.strip() for p in forwarded.split(",") if p.strip()]
+            if parts:
+                if forwarded_allow_ips.strip() == "*":
+                    return parts[-1]
+                for candidate in reversed(parts):
+                    if not _is_trusted_proxy(candidate, forwarded_allow_ips):
+                        return candidate
+                return parts[0]
+        real_ip = request.headers.get("x-real-ip")
+        if real_ip:
+            return real_ip.strip()
+    return client_host or "unknown"
 
 
 class RateLimiter:
-    """Thread-safe sliding-window rate limiter for auth endpoints."""
+    """Thread-safe sliding-window rate limiter."""
 
-    def __init__(self, max_attempts: int = 10, window_seconds: int = 300) -> None:
+    def __init__(
+        self,
+        max_attempts: int = 10,
+        window_seconds: int = 300,
+        max_keys: int = 2048,
+        detail: str = "Too many authentication attempts. Please wait a few minutes and try again.",
+    ) -> None:
         self.max_attempts = max_attempts
         self.window_seconds = window_seconds
+        self.max_keys = max_keys
+        self.detail = detail
         self._attempts: dict[str, list[float]] = defaultdict(list)
         self._lock = Lock()
+
+    def _prune_unlocked(self, cutoff: float) -> None:
+        stale_keys = [k for k, ts in self._attempts.items() if not ts or ts[-1] <= cutoff]
+        for k in stale_keys:
+            self._attempts.pop(k, None)
+        while len(self._attempts) >= self.max_keys:
+            oldest_key = min(self._attempts, key=lambda k: self._attempts[k][-1] if self._attempts[k] else 0.0)
+            self._attempts.pop(oldest_key, None)
+
+    def ensure_not_limited(self, key: str) -> None:
+        now = time.monotonic()
+        cutoff = now - self.window_seconds
+        with self._lock:
+            recent = [t for t in self._attempts.get(key, []) if t > cutoff]
+            if len(recent) >= self.max_attempts:
+                self._attempts[key] = recent
+                raise HTTPException(
+                    status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                    detail=self.detail,
+                )
 
     def check(self, key: str) -> None:
         now = time.monotonic()
         cutoff = now - self.window_seconds
         with self._lock:
-            recent = [t for t in self._attempts[key] if t > cutoff]
+            if key not in self._attempts and len(self._attempts) >= self.max_keys:
+                self._prune_unlocked(cutoff)
+            recent = [t for t in self._attempts.get(key, []) if t > cutoff]
             if len(recent) >= self.max_attempts:
+                self._attempts[key] = recent
                 raise HTTPException(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail="Too many authentication attempts. Please wait a few minutes and try again.",
+                    detail=self.detail,
                 )
             recent.append(now)
             self._attempts[key] = recent
@@ -118,3 +209,18 @@ class RateLimiter:
 
 
 auth_rate_limiter = RateLimiter(max_attempts=12, window_seconds=300)
+share_rate_limiter = RateLimiter(
+    max_attempts=60,
+    window_seconds=60,
+    detail="Too many share requests. Please slow down and try again shortly.",
+)
+share_media_rate_limiter = RateLimiter(
+    max_attempts=300,
+    window_seconds=60,
+    detail="Too many share requests. Please slow down and try again shortly.",
+)
+share_miss_rate_limiter = RateLimiter(
+    max_attempts=20,
+    window_seconds=300,
+    detail="Too many invalid share link attempts. Please wait a few minutes and try again.",
+)

@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.0.4
+
+### Features & Improvements
+- **Backup Restore (`POST /api/backup/restore`)**: Admins can now upload a KidArtVault backup `.zip` in **Options → Backup** to idempotently restore missing child profiles, artwork records, and original images while automatically regenerating WebP thumbnails.
+- **Batch Capture (`Save & Capture Next`)**: Added **Save & Capture Next** in the upload modal to save an artwork and jump straight back to capture while preserving the selected child, location, and date.
+- **Share Link Management Polish**: Improved **Options → Shares** with active/expired status badges, explicit **Revoke** button with confirmation and error handling, **Copied** feedback, active share count, and fixed scope display for untitled single-artwork shares.
+- **README Cleanup**: Removed repository CI/CD setup instructions from `README.md` and documented `FORWARDED_ALLOW_IPS`.
+
+### Security Hardening
+- **External Exposure Hardening**: Added sliding-window rate limiting on public share endpoints (`/api/public/share/{token}`, `/thumb`, `/image`, and invalid-token misses), made `FORWARDED_ALLOW_IPS` configurable (defaulting to `127.0.0.1,::1` instead of `*`), added `Content-Security-Policy` & `Permissions-Policy` headers, CSRF `Origin` checks, session invalidation on password change, automatic persisted `SECRET_KEY` replacement when unset/placeholder, bounded upload reads, and Pillow decompression-bomb limits.
+
 ## v0.0.3
 
 ### Features & Improvements

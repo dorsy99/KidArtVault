@@ -1,4 +1,5 @@
 import json
+import re
 import uuid
 from datetime import date
 from pathlib import Path
@@ -14,19 +15,65 @@ from app.models import ArtworkUpdate
 
 router = APIRouter(prefix="/api/artworks", tags=["artworks"])
 
+DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+UPLOAD_CHUNK_SIZE = 1024 * 1024
+
+
+def _escape_like(val: str) -> str:
+    return val.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def _validate_iso_date(raw: str) -> str:
+    cleaned = raw.strip()
+    if not DATE_RE.match(cleaned):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="artwork_date must be YYYY-MM-DD",
+        )
+    try:
+        date.fromisoformat(cleaned)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="artwork_date must be a valid calendar date (YYYY-MM-DD)",
+        ) from exc
+    return cleaned
+
+
+async def _read_upload_bounded(file: UploadFile, max_bytes: int) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        chunk = await file.read(UPLOAD_CHUNK_SIZE)
+        if not chunk:
+            break
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"File exceeds maximum size of {max_bytes // (1024 * 1024)}MB.",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
+
 
 def _parse_tags(raw: str | None) -> list[str]:
     if not raw:
         return []
     raw = raw.strip()
+    items: list[str]
     if raw.startswith("["):
         try:
             parsed = json.loads(raw)
             if isinstance(parsed, list):
-                return [str(t).strip() for t in parsed if str(t).strip()]
+                items = [str(t).strip() for t in parsed if str(t).strip()]
+            else:
+                items = [t.strip() for t in raw.split(",") if t.strip()]
         except json.JSONDecodeError:
-            pass
-    return [t.strip() for t in raw.split(",") if t.strip()]
+            items = [t.strip() for t in raw.split(",") if t.strip()]
+    else:
+        items = [t.strip() for t in raw.split(",") if t.strip()]
+    return [t[:60] for t in items[:30]]
 
 
 def _serialize_artwork(row) -> dict:
@@ -66,8 +113,8 @@ def list_artworks(
     if favorite is True:
         clauses.append("a.is_favorite = 1")
     if tag:
-        clauses.append("LOWER(a.tags) LIKE ?")
-        params.append(f'%"{tag.strip().lower()}"%')
+        clauses.append("LOWER(a.tags) LIKE ? ESCAPE '\\'")
+        params.append(f'%"{_escape_like(tag.strip().lower())}"%')
     if date_from:
         clauses.append("a.artwork_date >= ?")
         params.append(date_from)
@@ -75,9 +122,10 @@ def list_artworks(
         clauses.append("a.artwork_date <= ?")
         params.append(date_to)
     if q:
-        like = f"%{q.strip().lower()}%"
+        like = f"%{_escape_like(q.strip().lower())}%"
         clauses.append(
-            "(LOWER(a.title) LIKE ? OR LOWER(a.notes) LIKE ? OR LOWER(a.tags) LIKE ? OR LOWER(a.location) LIKE ?)"
+            "(LOWER(a.title) LIKE ? ESCAPE '\\' OR LOWER(a.notes) LIKE ? ESCAPE '\\' "
+            "OR LOWER(a.tags) LIKE ? ESCAPE '\\' OR LOWER(a.location) LIKE ? ESCAPE '\\')"
         )
         params.extend([like, like, like, like])
 
@@ -143,28 +191,25 @@ def get_facets(
 async def upload_artwork(
     file: UploadFile = File(...),
     kid_id: int = Form(...),
-    title: str = Form(""),
-    notes: str = Form(""),
-    location: str = Form(""),
-    tags: str = Form(""),
-    artwork_date: str = Form(""),
+    title: str = Form("", max_length=150),
+    notes: str = Form("", max_length=4000),
+    location: str = Form("", max_length=80),
+    tags: str = Form("", max_length=2500),
+    artwork_date: str = Form("", max_length=10),
     is_favorite: bool = Form(False),
     user: dict = Depends(require_contributor),
     settings: Settings = Depends(get_settings),
 ) -> dict:
+    validated_date = _validate_iso_date(artwork_date) if artwork_date.strip() else ""
+
     with get_db(settings.db_path) as conn:
         kid = conn.execute("SELECT id, name FROM kids WHERE id = ?", (kid_id,)).fetchone()
         if not kid:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Child not found")
 
-    raw_bytes = await file.read()
+    raw_bytes = await _read_upload_bounded(file, settings.max_upload_bytes)
     if not raw_bytes:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Empty file")
-    if len(raw_bytes) > settings.max_upload_bytes:
-        raise HTTPException(
-            status_code=413,
-            detail=f"File exceeds maximum size of {settings.max_upload_bytes // (1024 * 1024)}MB.",
-        )
 
     artwork_id = uuid.uuid4().hex
     try:
@@ -174,12 +219,12 @@ async def upload_artwork(
             settings.originals_dir,
             settings.thumbs_dir,
             kid_name=kid["name"],
-            artwork_date=artwork_date,
+            artwork_date=validated_date,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-    resolved_date = artwork_date.strip() or exif_date or date.today().isoformat()
+    resolved_date = validated_date or exif_date or date.today().isoformat()
     parsed_tags = _parse_tags(tags)
     clean_title = title.strip()
 
@@ -249,6 +294,9 @@ def update_artwork(
     user: dict = Depends(require_contributor),
     settings: Settings = Depends(get_settings),
 ) -> dict:
+    if body.artwork_date is not None:
+        _validate_iso_date(body.artwork_date)
+
     with get_db(settings.db_path) as conn:
         existing = conn.execute("SELECT * FROM artworks WHERE id = ?", (artwork_id,)).fetchone()
         if not existing:
@@ -263,7 +311,11 @@ def update_artwork(
         title = body.title.strip() if body.title is not None else existing["title"]
         notes = body.notes.strip() if body.notes is not None else existing["notes"]
         location = body.location.strip() if body.location is not None else existing["location"]
-        tags_json = json.dumps([t.strip() for t in body.tags if t.strip()]) if body.tags is not None else existing["tags"]
+        tags_json = (
+            json.dumps([t.strip()[:60] for t in body.tags[:30] if t.strip()])
+            if body.tags is not None
+            else existing["tags"]
+        )
         artwork_date = body.artwork_date if body.artwork_date is not None else existing["artwork_date"]
         is_favorite = (1 if body.is_favorite else 0) if body.is_favorite is not None else existing["is_favorite"]
 
@@ -289,6 +341,19 @@ def update_artwork(
     return _serialize_artwork(row)
 
 
+def _safe_unlink(base_dir: Path, filename: str) -> None:
+    root = base_dir.resolve()
+    target = (root / filename).resolve()
+    if root not in target.parents:
+        return
+    target.unlink(missing_ok=True)
+    if target.parent != root:
+        try:
+            target.parent.rmdir()
+        except OSError:
+            pass
+
+
 @router.delete("/{artwork_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_artwork(
     artwork_id: str,
@@ -305,16 +370,8 @@ def delete_artwork(
         conn.execute("DELETE FROM artworks WHERE id = ?", (artwork_id,))
         conn.commit()
 
-    orig_file = settings.originals_dir / row["original_filename"]
-    thumb_file = settings.thumbs_dir / row["thumb_filename"]
-    orig_file.unlink(missing_ok=True)
-    thumb_file.unlink(missing_ok=True)
-    for parent, root in ((orig_file.parent, settings.originals_dir), (thumb_file.parent, settings.thumbs_dir)):
-        if parent != root:
-            try:
-                parent.rmdir()
-            except OSError:
-                pass
+    _safe_unlink(settings.originals_dir, row["original_filename"])
+    _safe_unlink(settings.thumbs_dir, row["thumb_filename"])
 
 
 def _safe_file_response(base_dir: Path, filename: str) -> FileResponse:

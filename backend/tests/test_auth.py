@@ -198,3 +198,114 @@ def test_cookie_secure_auto_mode(tmp_path):
         r = https_client.post("/api/auth/login", json={"username": "nas", "password": "password123"})
         assert r.status_code == 200
         assert "secure" in r.headers.get("set-cookie", "").lower()
+
+
+def test_session_invalidated_on_password_change_and_csrf_origin(client):
+    r = client.post("/api/auth/setup", json={"username": "parent", "password": "supersecurepassword"})
+    assert r.status_code == 201
+    assert "content-security-policy" in r.headers
+    old_cookie = client.cookies.get("kidart_session")
+    assert old_cookie
+
+    # Cross-origin state-changing request is blocked by Origin check
+    r_csrf = client.post(
+        "/api/kids",
+        json={"name": "Blocked"},
+        headers={"Origin": "https://evil.example.com"},
+    )
+    assert r_csrf.status_code == 403
+
+    # Same-origin request succeeds
+    r_same = client.post(
+        "/api/kids",
+        json={"name": "Allowed"},
+        headers={"Origin": "http://testserver"},
+    )
+    assert r_same.status_code == 201
+
+    # Change password rotates the current session cookie and invalidates the old token
+    r_pw = client.post(
+        "/api/auth/change-password",
+        json={"current_password": "supersecurepassword", "new_password": "brandnewpassword123"},
+    )
+    assert r_pw.status_code == 200
+    new_cookie = client.cookies.get("kidart_session")
+    assert new_cookie != old_cookie
+    assert client.get("/api/kids").status_code == 200
+
+    # Presenting the old pre-password-change cookie is rejected
+    client.cookies.set("kidart_session", old_cookie)
+    assert client.get("/api/kids").status_code == 401
+    assert client.get("/api/auth/status").json()["authenticated"] is False
+
+
+def test_rate_limit_blocks_rotating_x_forwarded_for_and_persists_secret_key(client, tmp_path, monkeypatch):
+    from app.config import load_settings
+
+    client.post("/api/auth/setup", json={"username": "parent", "password": "supersecurepassword"})
+    client.post("/api/auth/logout")
+
+    # Even if an attacker rotates X-Forwarded-For on every request, per-username rate limiting blocks brute-forcing
+    for i in range(12):
+        r = client.post(
+            "/api/auth/login",
+            json={"username": "parent", "password": "wrongpassword"},
+            headers={"X-Forwarded-For": f"203.0.113.{i + 1}"},
+        )
+        assert r.status_code == 401
+
+    r_blocked = client.post(
+        "/api/auth/login",
+        json={"username": "parent", "password": "wrongpassword"},
+        headers={"X-Forwarded-For": "198.51.100.99"},
+    )
+    assert r_blocked.status_code == 429
+
+    # Verify placeholder SECRET_KEY is replaced and persisted in DATA_DIR/.secret_key
+    monkeypatch.setenv("DATA_DIR", str(tmp_path / "vault_data"))
+    monkeypatch.setenv("SECRET_KEY", "change-me-to-a-long-random-hex-string-at-least-32-chars")
+    s1 = load_settings()
+    s2 = load_settings()
+    assert len(s1.secret_key) == 64
+    assert s1.secret_key == s2.secret_key
+    assert (tmp_path / "vault_data" / ".secret_key").is_file()
+
+
+def test_forwarded_allow_ips_config_and_trusted_proxy_ip_extraction(monkeypatch):
+    from types import SimpleNamespace
+    from app.config import load_settings
+    from app.security import get_client_ip
+
+    monkeypatch.delenv("FORWARDED_ALLOW_IPS", raising=False)
+    assert load_settings().forwarded_allow_ips == "127.0.0.1,::1"
+
+    monkeypatch.setenv("FORWARDED_ALLOW_IPS", "127.0.0.1,172.16.0.0/12")
+    assert load_settings().forwarded_allow_ips == "127.0.0.1,172.16.0.0/12"
+
+    def make_req(client_host: str, headers: dict[str, str], allow_ips: str):
+        norm_headers = {k.lower(): v for k, v in headers.items()}
+        return SimpleNamespace(
+            client=SimpleNamespace(host=client_host),
+            headers=norm_headers,
+            app=SimpleNamespace(state=SimpleNamespace(settings=SimpleNamespace(forwarded_allow_ips=allow_ips))),
+        )
+
+    # Untrusted direct client cannot spoof X-Forwarded-For or X-Real-IP
+    untrusted = make_req(
+        "198.51.100.42",
+        {"X-Forwarded-For": "203.0.113.9", "X-Real-IP": "203.0.113.10"},
+        "127.0.0.1,172.16.0.0/12",
+    )
+    assert get_client_ip(untrusted) == "198.51.100.42"
+
+    # Trusted proxy in CIDR range honors rightmost untrusted X-Forwarded-For entry
+    proxied = make_req(
+        "172.18.0.2",
+        {"X-Forwarded-For": "1.2.3.4, 203.0.113.77, 172.18.0.1"},
+        "127.0.0.1,172.16.0.0/12",
+    )
+    assert get_client_ip(proxied) == "203.0.113.77"
+
+    # Trusted proxy with X-Real-IP only
+    real_ip_req = make_req("127.0.0.1", {"X-Real-IP": "203.0.113.88"}, "127.0.0.1,::1")
+    assert get_client_ip(real_ip_req) == "203.0.113.88"

@@ -1,14 +1,38 @@
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import urlparse
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from app.config import Settings, load_settings
 from app.database import init_db
 from app.routers import artworks, auth, backup, kids, options, shares, users
+
+STATE_CHANGING_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+CSP_POLICY = (
+    "default-src 'self'; "
+    "img-src 'self' data: blob:; "
+    "style-src 'self' 'unsafe-inline'; "
+    "script-src 'self'; "
+    "connect-src 'self'; "
+    "frame-ancestors 'none'"
+)
+
+
+def _is_origin_allowed(request: Request, settings: Settings) -> bool:
+    origin = request.headers.get("origin")
+    if not origin:
+        return True
+    normalized_origin = origin.strip().rstrip("/")
+    if normalized_origin in settings.allowed_origins:
+        return True
+    parsed = urlparse(normalized_origin)
+    host = request.headers.get("x-forwarded-host") or request.headers.get("host") or ""
+    host = host.split(",")[0].strip()
+    return bool(parsed.netloc and host and parsed.netloc.lower() == host.lower())
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -36,10 +60,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.middleware("http")
     async def security_headers_middleware(request: Request, call_next):
+        if request.method in STATE_CHANGING_METHODS and not _is_origin_allowed(request, resolved_settings):
+            return JSONResponse(
+                status_code=status.HTTP_403_FORBIDDEN,
+                content={"detail": "Cross-origin request blocked"},
+            )
         response = await call_next(request)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+        response.headers.setdefault("Content-Security-Policy", CSP_POLICY)
+        response.headers.setdefault("Permissions-Policy", "camera=(self), microphone=(), geolocation=()")
         return response
 
     @app.get("/api/health")

@@ -76,6 +76,7 @@ Copy [.env.example](.env.example) to `.env` and configure:
 | `TZ` | No | `UTC` | Timezone for container logs and timestamps (e.g. `Australia/Sydney`). |
 | `MAX_UPLOAD_MB` | No | `30` | Maximum upload file size in MB. |
 | `ALLOWED_ORIGINS` | No | `""` | Comma-separated CORS origins if accessed cross-origin (leave empty for same-origin reverse proxy). |
+| `FORWARDED_ALLOW_IPS` | No | `127.0.0.1,::1` | Comma-separated trusted proxy IPs/CIDRs for `X-Forwarded-*` headers (e.g. `127.0.0.1,::1,172.16.0.0/12` behind Docker/Synology reverse proxy). |
 
 ---
 
@@ -97,6 +98,7 @@ services:
       - SECRET_KEY=${SECRET_KEY:?Set SECRET_KEY in .env}
       - COOKIE_SECURE=${COOKIE_SECURE:-auto}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-}
+      - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS:-127.0.0.1,::1}
       - MAX_UPLOAD_MB=${MAX_UPLOAD_MB:-30}
       - TZ=${TZ:-Australia/Sydney}
     volumes:
@@ -124,7 +126,7 @@ docker compose up -d
    - Source: `https://art.yourdomain.com:443`
    - Destination: `http://localhost:8080` (or your configured `HOST_PORT`)
    - Assign a Let's Encrypt certificate in *Control Panel → Security → Certificate*.
-   - Ensure `COOKIE_SECURE=true` is set in `.env`.
+   - Ensure `COOKIE_SECURE=true` is set in `.env`, and set `FORWARDED_ALLOW_IPS` to your reverse proxy's IP or Docker bridge subnet (e.g. `127.0.0.1,::1,172.16.0.0/12`) so real client IPs and `X-Forwarded-Proto` are trusted.
    - *(Alternative: point a Cloudflare Tunnel to `http://localhost:8080`.)*
 2. Open `https://art.yourdomain.com` on your first visit and create your parent admin account.
 3. Go to **Options → Security** to enable **TOTP 2FA** before sharing the URL externally.
@@ -149,25 +151,4 @@ uvicorn app.main:app --reload --port 8000
 cd frontend
 npm install
 npm run dev
-```
-
----
-
-## GitHub & Automatic Docker Hub Releases
-
-This repository includes two GitHub Actions workflows:
-- [ci.yml](.github/workflows/ci.yml): Runs `pytest` and builds the React PWA on every push/PR to `main`.
-- [release.yml](.github/workflows/release.yml): On any `v*` tag (e.g. `v1.0.0`), runs tests, builds a multi-architecture (`linux/amd64` + `linux/arm64`) Docker image, pushes it to [`dorsy99/kidartvault`](https://hub.docker.com/r/dorsy99/kidartvault), and creates a GitHub Release on [`dorsy99/KidArtVault`](https://github.com/dorsy99/KidArtVault).
-
-### One-Time Setup
-1. Push this repo to GitHub (`main` branch).
-2. In Docker Hub, create an Access Token (**Account Settings → Personal access tokens**).
-3. In your GitHub repository, go to **Settings → Secrets and variables → Actions** and add:
-   - `DOCKERHUB_USERNAME` — your Docker Hub username
-   - `DOCKERHUB_TOKEN` — your Docker Hub access token
-
-### Publishing a New Release
-```bash
-git tag v1.0.0
-git push origin v1.0.0
 ```
