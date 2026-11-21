@@ -269,3 +269,43 @@ def test_rate_limit_blocks_rotating_x_forwarded_for_and_persists_secret_key(clie
     assert len(s1.secret_key) == 64
     assert s1.secret_key == s2.secret_key
     assert (tmp_path / "vault_data" / ".secret_key").is_file()
+
+
+def test_forwarded_allow_ips_config_and_trusted_proxy_ip_extraction(monkeypatch):
+    from types import SimpleNamespace
+    from app.config import load_settings
+    from app.security import get_client_ip
+
+    monkeypatch.delenv("FORWARDED_ALLOW_IPS", raising=False)
+    assert load_settings().forwarded_allow_ips == "127.0.0.1,::1"
+
+    monkeypatch.setenv("FORWARDED_ALLOW_IPS", "127.0.0.1,172.16.0.0/12")
+    assert load_settings().forwarded_allow_ips == "127.0.0.1,172.16.0.0/12"
+
+    def make_req(client_host: str, headers: dict[str, str], allow_ips: str):
+        norm_headers = {k.lower(): v for k, v in headers.items()}
+        return SimpleNamespace(
+            client=SimpleNamespace(host=client_host),
+            headers=norm_headers,
+            app=SimpleNamespace(state=SimpleNamespace(settings=SimpleNamespace(forwarded_allow_ips=allow_ips))),
+        )
+
+    # Untrusted direct client cannot spoof X-Forwarded-For or X-Real-IP
+    untrusted = make_req(
+        "198.51.100.42",
+        {"X-Forwarded-For": "203.0.113.9", "X-Real-IP": "203.0.113.10"},
+        "127.0.0.1,172.16.0.0/12",
+    )
+    assert get_client_ip(untrusted) == "198.51.100.42"
+
+    # Trusted proxy in CIDR range honors rightmost untrusted X-Forwarded-For entry
+    proxied = make_req(
+        "172.18.0.2",
+        {"X-Forwarded-For": "1.2.3.4, 203.0.113.77, 172.18.0.1"},
+        "127.0.0.1,172.16.0.0/12",
+    )
+    assert get_client_ip(proxied) == "203.0.113.77"
+
+    # Trusted proxy with X-Real-IP only
+    real_ip_req = make_req("127.0.0.1", {"X-Real-IP": "203.0.113.88"}, "127.0.0.1,::1")
+    assert get_client_ip(real_ip_req) == "203.0.113.88"
