@@ -12,6 +12,7 @@ import {
   ShieldOff,
   Tag,
   Trash2,
+  Upload,
   UserPlus,
   Users,
   X,
@@ -65,6 +66,11 @@ export const OptionsPage: React.FC<OptionsPageProps> = ({ user, kids, onKidsChan
   const [shareErr, setShareErr] = useState('');
   const [copiedShareToken, setCopiedShareToken] = useState<string | null>(null);
   const [revokingToken, setRevokingToken] = useState<string | null>(null);
+
+  // Backup restore state
+  const [restoring, setRestoring] = useState(false);
+  const [restoreMsg, setRestoreMsg] = useState('');
+  const [restoreErr, setRestoreErr] = useState('');
 
   // 2FA setup state
   const [setup2fa, setSetup2fa] = useState<{ secret: string; qr_data_uri: string } | null>(null);
@@ -296,6 +302,33 @@ export const OptionsPage: React.FC<OptionsPageProps> = ({ user, kids, onKidsChan
       }, 2000);
     } catch {
       setShareErr('Could not copy link to clipboard.');
+    }
+  };
+
+  const handleRestoreBackup = async (file: File | undefined) => {
+    if (!file) return;
+    if (
+      !confirm(
+        `Restore artworks and children from "${file.name}"? Existing records will be kept and missing items will be restored with regenerated thumbnails.`,
+      )
+    ) {
+      return;
+    }
+    setRestoring(true);
+    setRestoreMsg('');
+    setRestoreErr('');
+    try {
+      const res = await api.backup.restore(file);
+      setRestoreMsg(
+        `Restore complete: ${res.restored_kids} ${res.restored_kids === 1 ? 'child' : 'children'} and ${res.restored_artworks} ${res.restored_artworks === 1 ? 'artwork' : 'artworks'} restored` +
+          (res.skipped_artworks > 0 ? ` (${res.skipped_artworks} skipped)` : '') +
+          '.',
+      );
+      onKidsChanged();
+    } catch (err) {
+      setRestoreErr(err instanceof Error ? err.message : 'Failed to restore backup');
+    } finally {
+      setRestoring(false);
     }
   };
 
@@ -841,10 +874,10 @@ export const OptionsPage: React.FC<OptionsPageProps> = ({ user, kids, onKidsChan
 
       {/* Full Backup Subsection (Admin Only) */}
       {show('backup') && (
-        <section className="card" style={{ padding: 20, display: 'grid', gap: 12 }}>
+        <section className="card" style={{ padding: 20, display: 'grid', gap: 14 }}>
           <h2 style={{ margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
             <Download size={20} color="var(--accent)" />
-            Full Backup
+            Backup &amp; Restore
           </h2>
           <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.9rem' }}>
             Download a compressed <code>.zip</code> archive containing all original artwork images (organized in per-child folders) along with a <code>metadata.json</code> file of titles, dates, locations, tags, and stories.
@@ -854,6 +887,37 @@ export const OptionsPage: React.FC<OptionsPageProps> = ({ user, kids, onKidsChan
               <Download size={16} />
               Download Full Backup (.zip)
             </a>
+          </div>
+
+          <hr style={{ border: 'none', borderTop: '1px solid var(--border)', margin: '4px 0' }} />
+
+          <div style={{ display: 'grid', gap: 10 }}>
+            <div style={{ fontWeight: 700, fontSize: '0.98rem' }}>Restore from Backup (.zip)</div>
+            <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.88rem' }}>
+              Upload a KidArtVault backup <code>.zip</code> to restore missing child profiles, artwork records, and original images. WebP thumbnails are regenerated automatically; existing artworks are not overwritten.
+            </p>
+            {restoreMsg && <div className="success-banner">{restoreMsg}</div>}
+            {restoreErr && <div className="error-banner">{restoreErr}</div>}
+            <div>
+              <label
+                className={`btn btn-secondary ${restoring ? 'disabled' : ''}`}
+                style={{ cursor: restoring ? 'not-allowed' : 'pointer', opacity: restoring ? 0.65 : 1 }}
+              >
+                <Upload size={16} />
+                {restoring ? 'Restoring Backup...' : 'Upload Backup (.zip)'}
+                <input
+                  type="file"
+                  accept=".zip,application/zip"
+                  disabled={restoring}
+                  style={{ display: 'none' }}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    e.target.value = '';
+                    handleRestoreBackup(file);
+                  }}
+                />
+              </label>
+            </div>
           </div>
         </section>
       )}

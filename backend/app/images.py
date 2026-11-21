@@ -115,3 +115,58 @@ def process_and_save_artwork(
     thumb.save(thumb_path, format="WEBP", quality=84, method=4)
 
     return original_filename, thumb_filename, width, height, file_size, exif_date
+
+
+def restore_artwork_files(
+    raw_bytes: bytes,
+    rel_original_path: str,
+    originals_dir: Path,
+    thumbs_dir: Path,
+) -> tuple[str, str, int, int, int]:
+    """
+    Validate an image from a backup archive, write the original to a safe path
+    under originals_dir, and regenerate its WebP thumbnail under thumbs_dir.
+
+    Returns: (original_filename, thumb_filename, width, height, file_size)
+    """
+    originals_root = originals_dir.resolve()
+    thumbs_root = thumbs_dir.resolve()
+    originals_root.mkdir(parents=True, exist_ok=True)
+    thumbs_root.mkdir(parents=True, exist_ok=True)
+
+    normalized = rel_original_path.replace("\\", "/").lstrip("/")
+    parts = [p for p in normalized.split("/") if p]
+    if not parts or any(p in (".", "..") for p in parts):
+        raise ValueError("Invalid archive image path.")
+
+    safe_rel = "/".join(parts)
+    original_path = (originals_root / safe_rel).resolve()
+    if originals_root not in original_path.parents:
+        raise ValueError("Invalid destination path for restored artwork.")
+
+    try:
+        img = Image.open(io.BytesIO(raw_bytes))
+        img.load()
+    except (UnidentifiedImageError, Image.DecompressionBombError, OSError) as exc:
+        raise ValueError("Backup entry is not a valid image.") from exc
+
+    img = ImageOps.exif_transpose(img)
+    width, height = img.size
+
+    original_path.parent.mkdir(parents=True, exist_ok=True)
+    original_path.write_bytes(raw_bytes)
+    file_size = original_path.stat().st_size
+
+    thumb = img.copy()
+    thumb.thumbnail(THUMB_MAX_SIZE, Image.Resampling.LANCZOS)
+    if thumb.mode not in ("RGB", "RGBA"):
+        thumb = thumb.convert("RGB")
+
+    thumb_rel = Path(safe_rel).with_suffix(".webp").as_posix()
+    thumb_path = (thumbs_root / thumb_rel).resolve()
+    if thumbs_root not in thumb_path.parents:
+        raise ValueError("Invalid destination path for restored thumbnail.")
+    thumb_path.parent.mkdir(parents=True, exist_ok=True)
+    thumb.save(thumb_path, format="WEBP", quality=84, method=4)
+
+    return safe_rel, thumb_rel, width, height, file_size
