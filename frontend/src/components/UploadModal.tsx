@@ -11,7 +11,7 @@ interface UploadModalProps {
   kids: Kid[];
   defaultKidId?: number | null;
   onClose: () => void;
-  onUploaded: (artwork: Artwork) => void;
+  onUploaded: (artwork: Artwork, options?: { keepOpen?: boolean }) => void;
 }
 
 export const UploadModal: React.FC<UploadModalProps> = ({
@@ -23,7 +23,9 @@ export const UploadModal: React.FC<UploadModalProps> = ({
   const [rawFile, setRawFile] = useState<File | null>(null);
   const [croppedBlob, setCroppedBlob] = useState<Blob | null>(null);
   const [step, setStep] = useState<'pick' | 'camera' | 'crop' | 'details'>('pick');
+  const [lastCaptureSource, setLastCaptureSource] = useState<'pick' | 'camera'>('pick');
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [savedCount, setSavedCount] = useState(0);
 
   const [kidId, setKidId] = useState<number>(defaultKidId ?? kids[0]?.id ?? 0);
   const [title, setTitle] = useState('');
@@ -58,16 +60,16 @@ export const UploadModal: React.FC<UploadModalProps> = ({
     return () => URL.revokeObjectURL(url);
   }, [croppedBlob, rawFile]);
 
-  const handleFileSelected = (file: File | undefined) => {
+  const handleFileSelected = (file: File | undefined, source: 'pick' | 'camera' = 'pick') => {
     if (!file) return;
+    setLastCaptureSource(source);
     setRawFile(file);
     setCroppedBlob(null);
     setStep('crop');
     setError('');
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const saveArtwork = async (keepOpen: boolean) => {
     const uploadBlob = croppedBlob ?? rawFile;
     if (!uploadBlob) return;
     if (!kidId) {
@@ -90,12 +92,28 @@ export const UploadModal: React.FC<UploadModalProps> = ({
       fd.append('is_favorite', String(isFavorite));
 
       const created = await api.artworks.upload(fd);
-      onUploaded(created);
+      onUploaded(created, { keepOpen });
+
+      if (keepOpen) {
+        setSavedCount((c) => c + 1);
+        setRawFile(null);
+        setCroppedBlob(null);
+        setTitle('');
+        setTags([]);
+        setNotes('');
+        setIsFavorite(false);
+        setStep(lastCaptureSource);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed');
     } finally {
       setSubmitting(false);
     }
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    await saveArtwork(false);
   };
 
   return (
@@ -114,13 +132,21 @@ export const UploadModal: React.FC<UploadModalProps> = ({
         </div>
 
         {error && <div className="error-banner" style={{ marginBottom: 12 }}>{error}</div>}
+        {savedCount > 0 && (step === 'pick' || step === 'camera') && (
+          <div className="success-banner" style={{ marginBottom: 12 }}>
+            Saved {savedCount} {savedCount === 1 ? 'artwork' : 'artworks'}! Ready to capture the next one.
+          </div>
+        )}
 
         {step === 'pick' && (
           <div style={{ display: 'grid', gap: 12, gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))' }}>
             <button
               type="button"
               className="card"
-              onClick={() => setStep('camera')}
+              onClick={() => {
+                setLastCaptureSource('camera');
+                setStep('camera');
+              }}
               style={{ padding: 28, textAlign: 'center', cursor: 'pointer', display: 'grid', gap: 10, placeItems: 'center' }}
             >
               <Camera size={34} color="var(--accent)" />
@@ -140,7 +166,10 @@ export const UploadModal: React.FC<UploadModalProps> = ({
                 type="file"
                 accept="image/*"
                 style={{ display: 'none' }}
-                onChange={(e) => handleFileSelected(e.target.files?.[0])}
+                onChange={(e) => {
+                  handleFileSelected(e.target.files?.[0], 'pick');
+                  e.target.value = '';
+                }}
               />
             </label>
           </div>
@@ -148,9 +177,9 @@ export const UploadModal: React.FC<UploadModalProps> = ({
 
         {step === 'camera' && (
           <CameraCapture
-            onCapture={(f) => handleFileSelected(f)}
+            onCapture={(f) => handleFileSelected(f, 'camera')}
             onCancel={() => setStep('pick')}
-            onFallbackFile={(f) => handleFileSelected(f)}
+            onFallbackFile={(f) => handleFileSelected(f, 'pick')}
           />
         )}
 
@@ -229,13 +258,23 @@ export const UploadModal: React.FC<UploadModalProps> = ({
               Mark as favorite
             </label>
 
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 4 }}>
-              <button type="button" className="btn btn-secondary" onClick={() => setStep('crop')}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8, marginTop: 4 }}>
+              <button type="button" className="btn btn-secondary" onClick={() => setStep('crop')} disabled={submitting}>
                 Back to Crop
               </button>
-              <button type="submit" className="btn btn-primary" disabled={submitting || kids.length === 0}>
-                {submitting ? 'Saving...' : 'Save to Vault'}
-              </button>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  onClick={() => saveArtwork(true)}
+                  disabled={submitting || kids.length === 0}
+                >
+                  {submitting ? 'Saving...' : 'Save & Capture Next'}
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={submitting || kids.length === 0}>
+                  {submitting ? 'Saving...' : 'Save to Vault'}
+                </button>
+              </div>
             </div>
           </form>
         )}
